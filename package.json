@@ -1,0 +1,19 @@
+{
+	"name": "pi-repair-layer",
+	"version": "0.1.0",
+	"description": "Tool-input repair layer for the pi coding agent: validate-then-repair for built-in tool calls, ported from the behavior of commandcode's repair layer",
+	"type": "module",
+	"main": "src/index.ts",
+	"scripts": {
+		"test": "bun test",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"typebox": "1.1.38"
+	},
+	"devDependencies": {
+		"@earendil-works/pi-coding-agent": "0.80.3",
+		"@types/bun": "^1.2.0",
+		"typescript": "^5.7.0"
+	}
+}
