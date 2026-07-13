@@ -16,7 +16,7 @@ importers:
         specifier: 2.4.8
         version: 2.4.8
       '@earendil-works/pi-ai':
-        specifier: ^0.80.3
+        specifier: ^0.80.6
         version: 0.80.6(ws@8.21.0)(zod@4.4.3)
       '@earendil-works/pi-coding-agent':
         specifier: 0.80.3

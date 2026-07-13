@@ -35,10 +35,11 @@ check() {
 
 echo
 echo "=== assertions ==="
-# 9 repair notes: read alias(1) + read autolink(1) + bash root-string(1) +
-# bash root-json(1) + edit flat(rename path + fold = 2) + edit nested(1) +
+# 10 repair notes: read alias(1) + read autolink(1) + bash root-string(1) +
+# bash root-json(1) + edit flat(rename path + fold = 2) +
+# edit nested(rename old_string + rename new_string = 2) +
 # grep(rename pattern + drop null = 2)
-check "repair_notes=9"
+check "repair_notes=10"
 check "errors=1"
 check 'Renamed `file_path` to `path` for tool "read"'
 check "Unwrapped a markdown auto-link"

@@ -1,6 +1,10 @@
 # Dependencies
 node_modules/
 
+# Docs
+HANDOFF.md
+.claude
+
 # Build outputs
 dist/
 *.tsbuildinfo
