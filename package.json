@@ -1,19 +1,61 @@
 {
-	"name": "pi-repair-layer",
-	"version": "0.1.0",
-	"description": "Tool-input repair layer for the pi coding agent: validate-then-repair for built-in tool calls, ported from the behavior of commandcode's repair layer",
-	"type": "module",
-	"main": "src/index.ts",
-	"scripts": {
-		"test": "bun test",
-		"typecheck": "tsc --noEmit"
-	},
-	"dependencies": {
-		"typebox": "1.1.38"
-	},
-	"devDependencies": {
-		"@earendil-works/pi-coding-agent": "0.80.3",
-		"@types/bun": "^1.2.0",
-		"typescript": "^5.7.0"
-	}
+  "name": "@r3b1s/pi-repair-layer",
+  "version": "0.1.0",
+  "description": "Tool-input repair layer for the pi coding agent: validate-then-repair for built-in tool calls, ported from the behavior of commandcode's repair layer",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/r3b1s/pi-repair-layer.git"
+  },
+  "files": [
+    "index.ts",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "tool-repair",
+    "validation"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "biome check . && eslint src/ test/ index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "biome check --write .",
+    "clean": "rm -rf dist node_modules coverage"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "dependencies": {
+    "typebox": "1.1.38"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.8",
+    "@earendil-works/pi-ai": "^0.80.3",
+    "@earendil-works/pi-coding-agent": "0.80.3",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.25.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.31.1",
+    "vitest": "^4.1.10"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "packageManager": "pnpm@11.11.0",
+  "engines": {
+    "node": ">=22"
+  }
 }

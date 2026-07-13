@@ -1,0 +1,44 @@
+name: Bug Report
+description: Report a bug in pi-repair-layer
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Package version
+      description: "Run: pnpm list @r3b1s/pi-repair-layer --depth 0"
+      placeholder: "e.g. 0.1.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to reproduce the behavior.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Pi version, OS, logs, screenshots, etc.
+    validations:
+      required: false

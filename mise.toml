@@ -1,0 +1,42 @@
+[tools]
+pnpm = "11"
+node = "lts"
+python = "3.11"
+usage = "latest"
+
+[env]
+_.path = ["./scripts/bin"]
+
+[tasks.install]
+run = "pnpm install"
+sources = ["package.json"]
+outputs = ["node_modules/.pnpm/lock.yaml"]
+
+[tasks.check]
+run = "pnpm run check"
+depends = ["install"]
+
+[tasks."lint:biome"]
+run = "biome check ."
+depends = ["install"]
+
+[tasks."lint:eslint"]
+run = "eslint src/ test/"
+depends = ["install"]
+
+[tasks.lint]
+run = "pnpm run lint"
+depends = ["install"]
+
+[tasks.test]
+run = "pnpm run test"
+depends = ["install"]
+
+[tasks.format]
+run = "pnpm run format"
+
+[tasks.ci]
+depends = ["check", "lint", "test"]
+
+[tasks.clean]
+run = "pnpm run clean"

@@ -1,2 +1,66 @@
+# Dependencies
 node_modules/
+
+# Build outputs
+dist/
+*.tsbuildinfo
+
+# Coverage
+coverage/
+htmlcov/
+
+# Pi - fully ignore all .pi/ directories at any depth
+**/.pi/**
+
+# Pi dev environment - generated/sensitive subpaths within .pi-dev/
+.pi-dev/sessions/
+.pi-dev/settings.json
+.pi-dev/trust.json
+.pi-dev/models.json
+.pi-dev/auth.json
+
+# Pi dev environment - symlinked infrastructure directories (optional, from global)
+.pi-dev/agents
+.pi-dev/extensions
+.pi-dev/themes
+.pi-dev/system-prompts
+.pi-dev/skills
+.pi-dev/prompts
+.pi-dev/npm
+.pi-dev/git
+
+# Dead code
+.fallow/
+
+# Packages
+*.tgz
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Vite temp
+*.temp
+*.tmp
+
+# Runtime artifacts (defensive — externalized to ~/.pi/agent/)
+*.db
+*.pid
 *.log
+
+# pnpm
+pnpm-debug.log*
+**/package-lock.json
+.pnpm-store/

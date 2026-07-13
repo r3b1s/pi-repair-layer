@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ──────────────────────────────────────────────
+# pi-dev — isolated pi development environment
+# ──────────────────────────────────────────────
+
+# ── Guards ───────────────────────────────────
+
+if [[ -z "${HOME:-}" ]]; then
+    echo "Error: \$HOME is not set. pi-dev requires a home directory." >&2
+    exit 1
+fi
+
+if ! command -v python3 &>/dev/null; then
+    echo "Error: python3 is required but not found on PATH." >&2
+    exit 1
+fi
+
+# ── Paths ────────────────────────────────────
+
+PI_AGENT="$HOME/.pi/agent"
+DEV_DIR="$PWD/.pi-dev"
+DEV_SOURCES="$DEV_DIR/dev-sources.json"
+
+# ── Cleanup ──────────────────────────────────
+
+if [[ "${1:-}" == "--clean" ]]; then
+    rm -rf "$DEV_DIR/sessions"
+    rm -f "$DEV_DIR/trust.json"
+    echo "Cleaned .pi-dev sessions and trust. dev-sources.json preserved."
+    exit 0
+fi
+
+# ── Locate & optionally scaffold dev-sources.json ──
+
+if [[ ! -f "$DEV_SOURCES" ]]; then
+    if [[ -t 0 ]]; then
+        echo "No .pi-dev/dev-sources.json found in $PWD."
+        echo "The dev environment generates settings.json dynamically from dev-sources.json"
+        echo "so your global pi config stays clean."
+        read -r -p "Would you like to create .pi-dev/ and scaffold it? [y/N] " reply
+        if [[ "$reply" == [yY] || "$reply" == [yY][eE][sS] ]]; then
+            mkdir -p "$DEV_DIR"
+            echo '[]' > "$DEV_SOURCES"
+        else
+            echo "Create .pi-dev/dev-sources.json to use dev mode."
+            exit 1
+        fi
+    else
+        echo "No .pi-dev/dev-sources.json found. Run from a directory with a .pi-dev/dev-sources.json file." >&2
+        exit 1
+    fi
+fi
+
+# ── Merge settings ───────────────────────────
+
+mkdir -p "$DEV_DIR"
+
+DEV_SOURCES_PATH="$DEV_SOURCES" python3 << 'PYEOF'
+import json, os
+
+home = os.environ['HOME']
+agent_dir = os.path.join(home, '.pi', 'agent')
+dev_sources_path = os.environ.get('DEV_SOURCES_PATH', '')
+
+global_path = os.path.join(agent_dir, 'settings.json')
+dev_path = os.path.abspath(dev_sources_path) if dev_sources_path else ''
+out_path = os.path.abspath('.pi-dev/settings.json')
+
+with open(global_path) as f:
+    global_s = json.load(f)
+
+with open(dev_path) as f:
+    dev_sources = json.load(f)
+
+pkgs = global_s.get('packages', [])
+
+# Resolve dev source paths to absolute paths — relative paths are resolved
+# against the settings file's directory by pi, but our dev-sources paths
+# are relative to cwd (the repo root), not .pi-dev/
+resolved_sources = []
+for s in dev_sources:
+    if s.startswith('./') or s.startswith('../'):
+        resolved_sources.append(os.path.abspath(s))
+    else:
+        resolved_sources.append(s)
+
+# Build set of package names from dev sources (for dedup against global)
+# e.g. './packages/pi-vim-stash' -> extract 'pi-vim-stash'
+dev_pkg_names = set()
+for s in resolved_sources:
+    name = os.path.basename(s.rstrip('/'))
+    if name:
+        dev_pkg_names.add(name)
+
+# Filter out global packages that have a local dev counterpart
+# so the local version wins (e.g. global 'git:github.com/r3b1s/pi-vim-stash'
+# is dropped when './packages/pi-vim-stash' is in dev-sources)
+filtered = []
+for p in pkgs:
+    pkg_name = os.path.basename(p.rstrip('/'))
+    if pkg_name in dev_pkg_names:
+        continue  # skip global, local version takes precedence
+    filtered.append(p)
+
+# Append resolved dev sources (deduped against remaining filtered list)
+for s in resolved_sources:
+    if s not in filtered:
+        filtered.append(s)
+
+global_s['packages'] = filtered
+
+# Remove sessionDir so pi falls back to <agentDir>/sessions/
+# Session isolation is handled via PI_CODING_AGENT_SESSION_DIR env var
+global_s.pop('sessionDir', None)
+
+# Forced defaults — always set regardless of global config
+global_s['collapseChangelog'] = True
+global_s['enableInstallTelemetry'] = False
+
+with open(out_path, 'w') as f:
+    json.dump(global_s, f, indent=2)
+PYEOF
+
+# ── Symlink helper ───────────────────────────
+
+ensure_symlink() {
+    local name="$1"
+    local target="$2"
+    local kind="$3"   # "essential" or "optional"
+
+    local link_path="$DEV_DIR/$name"
+
+    if [[ ! -e "$target" ]]; then
+        if [[ "$kind" == "essential" ]]; then
+            if [[ "$name" == *.* ]]; then
+                touch "$link_path"
+                echo "Created empty .pi-dev/$name (global $target not found)"
+            else
+                mkdir -p "$link_path"
+                echo "Created empty .pi-dev/$name/ (global $target not found)"
+            fi
+        else
+            echo "Warning: skipping .pi-dev/$name (global $target not found)" >&2
+        fi
+        return
+    fi
+
+    rm -rf "$link_path" 2>/dev/null
+    ln -sfn "$target" "$link_path"
+}
+
+# ── Create symlinks ──────────────────────────
+
+ensure_symlink "agents"          "$PI_AGENT/agents/"          "essential"
+# extensions/ is intentionally NOT symlinked — local dev packages provide their
+# own extensions via the packages array; global extensions could conflict
+ensure_symlink "npm"             "$PI_AGENT/npm/"             "optional"
+ensure_symlink "git"             "$PI_AGENT/git/"             "optional"
+ensure_symlink "themes"          "$PI_AGENT/themes/"          "optional"
+ensure_symlink "system-prompts"  "$PI_AGENT/system-prompts/"  "optional"
+ensure_symlink "skills"          "$PI_AGENT/skills/"          "optional"
+ensure_symlink "prompts"         "$PI_AGENT/prompts/"         "optional"
+
+ensure_symlink "models.json"     "$PI_AGENT/models.json"      "essential"
+ensure_symlink "trust.json"      "$PI_AGENT/trust.json"       "essential"
+ensure_symlink "auth.json"       "$PI_AGENT/auth.json"        "essential"
+
+# ── Sessions directory ───────────────────────
+
+mkdir -p "$DEV_DIR/sessions"
+
+# ── Launch pi ────────────────────────────────
+
+exec env \
+    PI_CODING_AGENT_DIR="$DEV_DIR" \
+    PI_CODING_AGENT_SESSION_DIR="$DEV_DIR/sessions" \
+    pi "$@"

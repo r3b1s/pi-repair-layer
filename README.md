@@ -20,12 +20,15 @@ overridden — that is this extension working as intended.
 At runtime pi's extension loader aliases `@earendil-works/pi-coding-agent` and
 `typebox` to the running instance's own modules, so the extension always binds
 to your live pi and its exact validator version. The `node_modules/` here is
-only used for `bun test` and `tsc`.
+only used for the tests and `tsc`.
 
 ```bash
-bun install   # once, if you want to run the tests
-bun test      # 29 tests: pure engine + end-to-end against pi's real tools
+pnpm install   # once, if you want to run the tests
+pnpm test      # pure engine unit tests + end-to-end against pi's real tools
 ```
+
+The toolchain is managed with [mise](https://mise.jdx.dev/) (`mise.toml` pins
+node/pnpm). `mise run ci` runs typecheck + lint + test.
 
 ## What it repairs
 
@@ -142,8 +145,8 @@ Findings so far, for whoever picks this up:
   `agent-session`/`sdk.js` stream through, or print mode resolves the stream
   function before extension providers finish applying.
 
-The repair mechanics themselves are fully covered by `bun test` (33 tests),
-which drives pi's real tool definitions and validation pipeline in-process.
+The repair mechanics themselves are fully covered by `pnpm test`, which drives
+pi's real tool definitions and validation pipeline in-process.
 
 ## Display settings
 

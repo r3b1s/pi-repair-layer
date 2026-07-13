@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# npx shim — redirects to pnpm exec
+
+echo "⛔ Use 'pnpm exec' or 'pnpm dlx' instead of npx in this monorepo." >&2
+echo "   Run: pnpm exec ${*}" >&2
+echo "   Or:  pnpm dlx ${*}" >&2
+exit 1

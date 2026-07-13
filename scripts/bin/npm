@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# npm shim — redirects to pnpm with pass-throughs for Pi internals
+
+# Find the real npm (skip this shim)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REAL_NPM=""
+while IFS= read -r p; do
+  if [[ "$p" != "$SCRIPT_DIR/npm" ]]; then
+    REAL_NPM="$p"
+    break
+  fi
+done < <(command -v -a npm 2>/dev/null)
+
+if [[ -z "$REAL_NPM" ]]; then
+  echo "⛔ npm not found. Use pnpm instead." >&2
+  exit 1
+fi
+
+# Allow npm root (used by Pi to locate packages)
+if [[ "$1" == "root" ]]; then
+  exec "$REAL_NPM" "$@"
+fi
+
+# Allow operations within .pi/npm/ (Pi's internal npm cache)
+for arg in "$@"; do
+  if [[ "$arg" == *".pi/npm/"* ]]; then
+    exec "$REAL_NPM" "$@"
+  fi
+done
+
+# Allow global installs (--global / -g)
+for arg in "$@"; do
+  if [[ "$arg" == "--global" || "$arg" == "-g" ]]; then
+    exec "$REAL_NPM" "$@"
+  fi
+done
+
+# Block everything else — redirect to pnpm
+echo "⛔ Use pnpm instead of npm in this monorepo." >&2
+echo "   Run: pnpm ${*}" >&2
+exit 1
