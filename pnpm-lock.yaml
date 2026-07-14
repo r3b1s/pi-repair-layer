@@ -19,8 +19,8 @@ importers:
         specifier: ^0.80.6
         version: 0.80.6(ws@8.21.0)(zod@4.4.3)
       '@earendil-works/pi-coding-agent':
-        specifier: 0.80.3
-        version: 0.80.3(ws@8.21.0)(zod@4.4.3)
+        specifier: 0.80.6
+        version: 0.80.6(ws@8.21.0)(zod@4.4.3)
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
@@ -215,8 +215,8 @@ packages:
     engines: {node: '>=22.19.0'}
     hasBin: true
 
-  '@earendil-works/pi-coding-agent@0.80.3':
-    resolution: {integrity: sha512-TIggw9gCXpA+Ph7OjdTA7ka2NPwTVuPmy39KDSyUzaKq8VvHfMGR7vtRz4JB7Um/RMRblmzhu4p9tUCk6MTgGA==}
+  '@earendil-works/pi-coding-agent@0.80.6':
+    resolution: {integrity: sha512-vcfD6tOk402isLl3Cm/qbn2O10TvgroMp1+/fEGM24ZdvETFCdOYv5VZ7m59EI5fPsjfSJh+CpQ5bhBrhfOg7g==}
     engines: {node: '>=22.19.0'}
     hasBin: true
 
@@ -1771,7 +1771,7 @@ snapshots:
       - ws
       - zod
 
-  '@earendil-works/pi-coding-agent@0.80.3(ws@8.21.0)(zod@4.4.3)':
+  '@earendil-works/pi-coding-agent@0.80.6(ws@8.21.0)(zod@4.4.3)':
     dependencies:
       '@earendil-works/pi-agent-core': 0.80.6(ws@8.21.0)(zod@4.4.3)
       '@earendil-works/pi-ai': 0.80.6(ws@8.21.0)(zod@4.4.3)
