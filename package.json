@@ -1,6 +1,6 @@
 {
   "name": "@r3b1s/pi-repair-layer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Tool-input repair layer for the pi coding agent: validate-then-repair for built-in tool calls, ported from the behavior of commandcode's repair layer",
   "repository": {
     "type": "git",
