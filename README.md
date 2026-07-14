@@ -41,12 +41,17 @@ Plain-English first, precise meaning after — for readers new to LLM tool-calli
 ## Install
 
 ```bash
-ln -s /home/dev/Local/personal/pi-commandcode-conundrum ~/.pi/agent/extensions/pi-repair-layer
+pi install npm:@r3b1s/pi-repair-layer
 ```
 
-pi auto-discovers `~/.pi/agent/extensions/*/index.ts`. Remove the symlink to
-uninstall. pi's TUI will show a one-time warning that built-in tools were
-overridden — that is this extension working as intended.
+Or from git:
+
+```bash
+pi install git:github.com/r3b1s/pi-repair-layer
+```
+
+pi's TUI will show a one-time warning that built-in tools were overridden —
+that is this extension working as intended.
 
 At runtime pi's extension loader aliases `@earendil-works/pi-coding-agent` and
 `typebox` to the running instance's own modules, so the extension always binds
