@@ -317,8 +317,7 @@ describe("iterative per-issue repairs", () => {
       schema: editSchema,
       input: {
         path: "/a.txt",
-        edits:
-          '[{"old_text":"a","new_text":"b"},{"search":"c","replace":"d"}]',
+        edits: '[{"old_text":"a","new_text":"b"},{"search":"c","replace":"d"}]',
       },
       config: REPAIR_CONFIGS.edit,
     });
