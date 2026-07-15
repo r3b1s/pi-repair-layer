@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/r3b1s/pi-repair-layer/compare/pi-repair-layer-v0.2.0...pi-repair-layer-v0.2.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* iterate per-issue repairs so one fix can expose the next ([6a40511](https://github.com/r3b1s/pi-repair-layer/commit/6a405115a2479ff882cf76bcfd624c64bc99e56f)), closes [#2](https://github.com/r3b1s/pi-repair-layer/issues/2)
+
 ## [0.2.0](https://github.com/r3b1s/pi-repair-layer/compare/pi-repair-layer-v0.1.0...pi-repair-layer-v0.2.0) (2026-07-14)
 
 
