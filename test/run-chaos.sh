@@ -12,6 +12,7 @@ cd "$DIR"
 printf 'alpha anchor\n' > fixture-a.txt
 printf 'edit me: alpha\n' > fixture-b.txt
 printf 'edit me: gamma\n' > fixture-c.txt
+printf 'edit me: delta\n' > fixture-d.txt
 
 export PI_TOOL_REPAIR_TELEMETRY="$DIR/telemetry.jsonl"
 export PI_TOOL_REPAIR_LOG=1
@@ -35,11 +36,13 @@ check() {
 
 echo
 echo "=== assertions ==="
-# 10 repair notes: read alias(1) + read autolink(1) + bash root-string(1) +
+# 12 repair notes: read alias(1) + read autolink(1) + bash root-string(1) +
 # bash root-json(1) + edit flat(rename path + fold = 2) +
 # edit nested(rename old_string + rename new_string = 2) +
+# edit stringified-snake(rename old_text + rename new_text = 2; pi's own edit
+# shim parses the stringified array before the engine runs) +
 # grep(rename pattern + drop null = 2)
-check "repair_notes=10"
+check "repair_notes=12"
 check "errors=1"
 check 'Renamed `file_path` to `path` for tool "read"'
 check "Unwrapped a markdown auto-link"
@@ -47,6 +50,8 @@ check 'Wrapped your bare string as `{command: "..."}` for tool "bash"'
 check "Parsed your JSON-stringified arguments"
 check "Folded flat \`old_string\`/\`new_string\` fields"
 check 'Renamed `old_string` to `oldText` for tool "edit"'
+check 'Renamed `old_text` to `oldText` for tool "edit"'
+check 'Renamed `new_text` to `newText` for tool "edit"'
 check 'Renamed `query` to `pattern` for tool "grep"'
 check 'Dropped null `glob` from tool "grep"'
 check 'Invalid input for tool "write"'
@@ -54,6 +59,7 @@ check 'Invalid input for tool "write"'
 # The repairs must also have actually worked:
 if grep -q 'edit me: omega' fixture-b.txt; then echo "PASS: flat edit applied"; else echo "FAIL: flat edit applied"; FAIL=1; fi
 if grep -q 'edit me: theta' fixture-c.txt; then echo "PASS: nested edit applied"; else echo "FAIL: nested edit applied"; FAIL=1; fi
+if grep -q 'edit me: kappa' fixture-d.txt; then echo "PASS: stringified snake_case edit applied"; else echo "FAIL: stringified snake_case edit applied"; FAIL=1; fi
 if [ ! -f chaos-out.txt ]; then echo "PASS: unrepairable write did not create a file"; else echo "FAIL: unrepairable write created chaos-out.txt"; FAIL=1; fi
 
 echo

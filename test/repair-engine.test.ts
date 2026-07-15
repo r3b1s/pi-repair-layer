@@ -254,6 +254,106 @@ describe("edit structural repairs", () => {
   });
 });
 
+describe("iterative per-issue repairs", () => {
+  test("stringified edits array with snake_case fields inside", () => {
+    const result = repairToolInput({
+      toolName: "edit",
+      schema: editSchema,
+      input: {
+        path: "/a.txt",
+        edits: '[{"old_text":"foo","new_text":"bar"}]',
+      },
+      config: REPAIR_CONFIGS.edit,
+    });
+    expect(result.outcome).toBe("repaired");
+    expect(result.args).toEqual({
+      path: "/a.txt",
+      edits: [{ oldText: "foo", newText: "bar" }],
+    });
+    expect(result.rulesFired).toEqual([
+      "parseJsonStringifiedArray",
+      "renameAliasedField",
+    ]);
+  });
+
+  test("stringified edits array with valid fields needs one pass", () => {
+    const result = repairToolInput({
+      toolName: "edit",
+      schema: editSchema,
+      input: {
+        path: "/a.txt",
+        edits: '[{"oldText":"foo","newText":"bar"}]',
+      },
+      config: REPAIR_CONFIGS.edit,
+    });
+    expect(result.outcome).toBe("repaired");
+    expect(result.rulesFired).toEqual(["parseJsonStringifiedArray"]);
+  });
+
+  test("stringified array whose elements are stringified objects", () => {
+    const result = repairToolInput({
+      toolName: "edit",
+      schema: editSchema,
+      input: {
+        path: "/a.txt",
+        edits: '["{\\"oldText\\":\\"foo\\",\\"newText\\":\\"bar\\"}"]',
+      },
+      config: REPAIR_CONFIGS.edit,
+    });
+    expect(result.outcome).toBe("repaired");
+    expect(result.args).toEqual({
+      path: "/a.txt",
+      edits: [{ oldText: "foo", newText: "bar" }],
+    });
+    expect(result.rulesFired).toEqual([
+      "parseJsonStringifiedArray",
+      "parseJsonStringifiedObject",
+    ]);
+  });
+
+  test("every element of a stringified array gets aliases renamed", () => {
+    const result = repairToolInput({
+      toolName: "edit",
+      schema: editSchema,
+      input: {
+        path: "/a.txt",
+        edits:
+          '[{"old_text":"a","new_text":"b"},{"search":"c","replace":"d"}]',
+      },
+      config: REPAIR_CONFIGS.edit,
+    });
+    expect(result.outcome).toBe("repaired");
+    expect(result.args).toEqual({
+      path: "/a.txt",
+      edits: [
+        { oldText: "a", newText: "b" },
+        { oldText: "c", newText: "d" },
+      ],
+    });
+  });
+
+  test("iteration never invents values: null alias inside stringified array stays unrepairable", () => {
+    const result = repairToolInput({
+      toolName: "edit",
+      schema: editSchema,
+      input: { path: "/a.txt", edits: '[{"old_text":null,"new_text":"b"}]' },
+      config: REPAIR_CONFIGS.edit,
+    });
+    expect(result.outcome).toBe("unrepairable");
+  });
+
+  test("terminates as unrepairable when no rule makes progress", () => {
+    const result = repairToolInput({
+      toolName: "edit",
+      schema: editSchema,
+      input: { path: "/a.txt", edits: [{ bogus: 42 }] },
+      config: REPAIR_CONFIGS.edit,
+    });
+    expect(result.outcome).toBe("unrepairable");
+    expect(result.rulesFired).toEqual([]);
+  });
+});
+
 describe("unrepairable input", () => {
   test("returns original input with no notes", () => {
     const input = { nothing: "useful" };

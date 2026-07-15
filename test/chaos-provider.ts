@@ -75,6 +75,19 @@ const CHAOS_CALLS: {
     expect: "renameAliasedField (nested in edits[0])",
   },
   {
+    id: "chaos-edit-stringified-snake",
+    name: "edit",
+    arguments: {
+      path: "fixture-d.txt",
+      edits: '[{"old_text":"delta","new_text":"kappa"}]',
+    },
+    // pi's own edit shim (prepareEditArguments) parses the stringified array
+    // before our engine runs, so end-to-end this repairs via renameAliasedField
+    // alone. The engine's iterative parse+rename path for the same shape is
+    // covered by unit tests; this scenario pins the full-pipeline outcome.
+    expect: "renameAliasedField x2 (pi shim pre-parses the stringified array)",
+  },
+  {
     id: "chaos-grep-alias-null",
     name: "grep",
     arguments: { query: "alpha", path: ".", glob: null },

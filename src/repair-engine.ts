@@ -292,6 +292,14 @@ const wrapBareStringAsArray: IssueRule = (site, toolName) => {
   return `Wrapped your bare string in a single-element array for \`${String(key)}\` in tool "${toolName}". Send an array (e.g. \`["foo"]\`) next time, not a single string.`;
 };
 
+/**
+ * Stage 5 re-collects issue sites after each pass that fired a rule, so
+ * repairs that reveal nested problems (parse a stringified array, then rename
+ * aliased fields inside it) converge instead of failing. Three passes cover
+ * every known two-step combination with one pass of headroom.
+ */
+const MAX_ISSUE_PASSES = 3;
+
 // Order matters: parse before wrap, rename before drop.
 const ISSUE_RULES: readonly [string, IssueRule][] = [
   ["renameAliasedField", renameAliasedField],
@@ -456,16 +464,28 @@ export function repairToolInput(options: {
   }
 
   // Stage 5: per-issue repairs at the strict validator's failure sites.
-  if (!schemaAccepts(schema, current)) {
+  // Iterates because one repair can expose sites the first collection couldn't
+  // see — e.g. parsing a stringified `edits` array surfaces aliased fields
+  // inside the parsed elements. Stops when the value validates or a full pass
+  // fires nothing (each firing rule mutates `current`, so a firing pass always
+  // makes progress); the cap only bounds pathological rule interactions.
+  for (
+    let pass = 0;
+    pass < MAX_ISSUE_PASSES && !schemaAccepts(schema, current);
+    pass++
+  ) {
+    let repairedThisPass = false;
     for (const site of collectIssueSites(schema, current)) {
       for (const [name, rule] of ISSUE_RULES) {
         const note = rule(site, toolName, config);
         if (note !== false) {
           fire(name, note);
+          repairedThisPass = true;
           break;
         }
       }
     }
+    if (!repairedThisPass) break;
   }
 
   // Stage 6: final verdict, now through pi's own pipeline (Convert, then
