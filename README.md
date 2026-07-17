@@ -101,46 +101,49 @@ explicit choice; it can never make the unknown call executable. The
 Legacy settings migrate in memory and are not rewritten until the user saves
 settings again.
 
-## Public npm API for tool owners
+## Integrating repairs into your own tools
 
-The package publishes compiled ESM, declarations, and source maps for:
-
-- `@r3b1s/pi-repair-layer/core` — pure pipeline, policies, envelope,
-  preprocessors, outcomes, lifecycle helpers, note formatting, and the
-  current-major `repairToolInput` compatibility facade.
-- `@r3b1s/pi-repair-layer/pi` — `adaptToolDefinition`, which wraps only a tool
-  definition explicitly supplied by its owning extension.
-- `@r3b1s/pi-repair-layer/grammar` — pure grammar parsing and recovery helpers.
-- `@r3b1s/pi-repair-layer` — the installable pi extension entry point.
-
-Minimal owner integration:
+Tool-owning extensions can opt in through the compiled
+`@r3b1s/pi-repair-layer/pi` adapter. Wrap the definition before registering it,
+then describe only the aliases and value transforms that are valid for that
+tool:
 
 ```ts
 import { adaptToolDefinition } from "@r3b1s/pi-repair-layer/pi";
 
-pi.registerTool(adaptToolDefinition({
-  name: "my_tool",
-  label: "My tool",
-  description: "An extension-owned tool",
-  parameters,
-  execute,
-}, {
-  policy: "adaptive",
-  preprocessors: [{
-    kind: "alias",
-    selector: "/path",
-    aliases: ["file_path"],
-    accepts: "string",
-  }],
-}));
+pi.registerTool(
+  adaptToolDefinition(
+    { name: "my_tool", label: "My tool", description, parameters, execute },
+    {
+      policy: "adaptive",
+      preprocessors: [
+        {
+          kind: "alias",
+          selector: "/path",
+          aliases: ["file_path"],
+          accepts: "string",
+        },
+      ],
+    },
+  ),
+);
 ```
 
-Installing this package as a pi extension does not automatically wrap tools
-registered by other extensions: only a tool owner has the pre-validation
-`prepareArguments` seam. The pure core has no filesystem, UI, event,
-telemetry, or network side effects. Node 22+ is supported; pi 0.80.6 is the
-verified integration baseline. Documented exports and types follow semantic
-versioning, and `repairToolInput` remains supported for the current major.
+The adapter preserves the definition, chains an existing `prepareArguments`,
+runs repair before pi validation, and fails closed by default. Installing this
+package does **not** automatically intercept tools registered by another
+extension; their owner must opt in. See the
+[tool-owner integration guide](docs/tool-owner-integration.md) for dependency
+setup, selector configuration, direct `/core` use, `<repair_note>` lifecycle
+wiring, safety boundaries, and testing advice.
+
+Public subpaths are `@r3b1s/pi-repair-layer/pi` for the adapter,
+`@r3b1s/pi-repair-layer/core` for the side-effect-free pipeline and lifecycle
+helpers, and `@r3b1s/pi-repair-layer/grammar` for pure grammar parsing. They are
+published as compiled ESM with declarations and source maps. Node 22+ is
+supported, pi 0.80.6 is the verified integration baseline, documented exports
+follow semantic versioning, and `repairToolInput` remains available for the
+current major.
 
 ## What it repairs
 
