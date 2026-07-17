@@ -136,6 +136,8 @@ supported for the current major.
 
 ## Settings and local telemetry
 
+All telemetry stays on your machine and is used only for debugging and tracing tool-call repairs; nothing is sent or uploaded.
+
 - `/repair-settings` changes the policy, grammar mode, unknown-tool text policy,
   TUI indicator, and visible repair notes.
 - `/repair-stats` summarizes local repair outcomes by model, tool, and rule.
