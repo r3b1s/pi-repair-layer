@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0](https://github.com/r3b1s/pi-repair-layer/compare/pi-repair-layer-v0.2.1...pi-repair-layer-v0.3.0) (2026-07-17)
+
+
+### Features
+
+* add holistic repair pipeline ([0a739a8](https://github.com/r3b1s/pi-repair-layer/commit/0a739a8649913fc600167516256f294296da3b24))
+
+
+### Documentation
+
+* add tool repair integration guide ([6f57830](https://github.com/r3b1s/pi-repair-layer/commit/6f5783022a2e720b21d60ccdf3023c55a8727af1))
+* streamline readme and add references ([387f273](https://github.com/r3b1s/pi-repair-layer/commit/387f273b63997b6a11973822c2638bca50d1944a))
+* Update README.md ([739cfc6](https://github.com/r3b1s/pi-repair-layer/commit/739cfc602504dd05bc25a4fae51b2b091b4dc31d))
+
 ## [0.2.1](https://github.com/r3b1s/pi-repair-layer/compare/pi-repair-layer-v0.2.0...pi-repair-layer-v0.2.1) (2026-07-15)
 
 
