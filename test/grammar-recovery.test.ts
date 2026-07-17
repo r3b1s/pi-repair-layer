@@ -4,7 +4,7 @@
  * - Pure parser tests ported from monotykamary/pi-tool-repair's grammar-repair
  *   suite (they exercise `parseToolGrammarLeaks` unchanged).
  * - Driver tests for `recoverGrammarLeaks`, including the new stopReason gate,
- *   the default-mode ("strip") never-promotes behavior, unknown-tool strip-only,
+ *   the default-mode ("strip") never-promotes behavior, unknown-tool preservation,
  *   and empty-args skip.
  * - One end-to-end test that drives a recovered call through the real agent loop
  *   (glm-gated, recover mode) and asserts the executed built-in surfaces a
@@ -188,7 +188,7 @@ describe("recoverGrammarLeaks driver", () => {
     expect(result.changed).toBe(false);
   });
 
-  test("unknown tool: text stripped, nothing promoted", () => {
+  test("unknown tool: text is preserved by default and never promoted", () => {
     const message = assistant(
       `<tool_call>{"name":"unknown","arguments":{"x":1}}</tool_call>`,
     );
@@ -196,10 +196,45 @@ describe("recoverGrammarLeaks driver", () => {
       mode: "recover",
       knownTools: knownBash, // "unknown" not in the allowlist
     });
+    expect(result.changed).toBe(false);
     expect(result.promoted).toBe(false);
+    expect((result.message.content[0] as { text?: string }).text).toContain(
+      "unknown",
+    );
     expect(result.message.content.some((p: any) => p.type === "toolCall")).toBe(
       false,
     );
+  });
+
+  test("explicit unknown-tool policy strips text without promotion", () => {
+    const message = assistant(
+      `<tool_call>{"name":"unknown","arguments":{"x":1}}</tool_call>`,
+    );
+    const result = recoverGrammarLeaks(message, {
+      mode: "recover",
+      knownTools: knownBash,
+      unknownToolText: "strip",
+    });
+    expect(result.changed).toBe(true);
+    expect(result.promoted).toBe(false);
+    expect((result.message.content[0] as { text?: string }).text).not.toContain(
+      "unknown",
+    );
+  });
+
+  test("observe mode records detection without changing message identity", () => {
+    const message = assistant(
+      `<tool_call>\n<function=bash>\n<parameter=command>pwd</parameter>\n</function>\n</tool_call>`,
+    );
+    const result = recoverGrammarLeaks(message, {
+      mode: "observe",
+      knownTools: knownBash,
+    });
+    expect(result.changed).toBe(false);
+    expect(result.observed).toBe(true);
+    expect(result.message).toBe(message);
+    expect(result.message.stopReason).toBe("stop");
+    expect(result.detectedRanges).toBe(1);
   });
 
   test("empty-argument candidate is stripped but not promoted", () => {

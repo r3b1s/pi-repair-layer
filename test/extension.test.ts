@@ -12,6 +12,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { beforeAll, describe, expect, test } from "vitest";
@@ -35,18 +36,15 @@ type RegisteredTool = {
 };
 
 const tools = new Map<string, RegisteredTool>();
-const eventHandlers = new Map<
-  string,
-  (event: unknown, ctx: unknown) => Promise<void>
->();
+const persistedEntries: unknown[] = [];
+const eventHandlers = new Map<string, (event: any, ctx: any) => Promise<any>>();
 
 const fakePi = {
   registerTool: (def: RegisteredTool) => tools.set(def.name, def),
   registerCommand: () => {},
-  on: (
-    event: string,
-    handler: (event: unknown, ctx: unknown) => Promise<void>,
-  ) => eventHandlers.set(event, handler),
+  appendEntry: (_type: string, data: unknown) => persistedEntries.push(data),
+  on: (event: string, handler: (event: any, ctx: any) => Promise<any>) =>
+    eventHandlers.set(event, handler),
 } as any;
 
 /** Mirror pi's validateToolArguments: Convert a clone, then Check. */
@@ -69,9 +67,37 @@ async function runLikePi(
     ? tool.prepareArguments(rawArgs)
     : rawArgs;
   const validated = validateLikePi(tool, prepared);
-  return tool.execute(toolCallId, validated, undefined, undefined, {
-    cwd: workDir,
-  });
+  await eventHandlers.get("tool_call")?.(
+    {
+      type: "tool_call",
+      toolName,
+      toolCallId,
+      input: validated,
+    },
+    {},
+  );
+  const result = await tool.execute(
+    toolCallId,
+    validated,
+    undefined,
+    undefined,
+    {
+      cwd: workDir,
+    },
+  );
+  const replacement = await eventHandlers.get("tool_result")?.(
+    {
+      type: "tool_result",
+      toolName,
+      toolCallId,
+      input: validated,
+      content: result.content,
+      details: result.details,
+      isError: false,
+    },
+    {},
+  );
+  return replacement ? { ...result, ...replacement } : result;
 }
 
 function resultText(result: any): string {
@@ -207,7 +233,7 @@ describe("TUI indicator", () => {
     );
     const rendered = component.render(80).join("\n");
     expect(rendered).toContain("🔨 ✓ input repaired");
-    expect(rendered).toContain("renameAliasedField");
+    expect(rendered).toContain("preprocess.exact-alias");
     expect(rendered).not.toContain("<repair_note>"); // notes off by default
   });
 
@@ -227,6 +253,26 @@ describe("TUI indicator", () => {
     );
     expect(component.render(80).join("\n")).not.toContain("🔨");
   });
+
+  test("repair-added lines fit narrow and wide terminal widths", async () => {
+    const file = join(workDir, "indicator-width.txt");
+    writeFileSync(file, "content\n");
+    const result = await runLikePi("read", { file_path: file }, "call-width");
+    const tool = tools.get("read") as any;
+    let lastComponent: any;
+    for (const width of [40, 58, 66, 80, 120]) {
+      const component = tool.renderResult(
+        result,
+        { expanded: false },
+        fakeTheme,
+        { toolCallId: "call-width", lastComponent },
+      );
+      lastComponent = component;
+      for (const line of component.render(width)) {
+        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
+    }
+  });
 });
 
 describe("telemetry", () => {
@@ -239,6 +285,24 @@ describe("telemetry", () => {
     expect(record.tool).toBeDefined();
     expect(record.model).toBe("test-model");
     expect(record.outcome).toMatch(/repaired|unrepairable/);
-    expect(record.fingerprint).toBeDefined();
+    expect(record.profile).toBe("adaptive");
+    expect(record.stages).toBeDefined();
+  });
+
+  test("telemetry and persisted indicators contain no argument values", async () => {
+    const secret = "secret-value-that-must-not-persist";
+    await runLikePi("bash", { cmd: `printf ${secret}` }, "call-secret");
+    const telemetry = readFileSync(
+      process.env.PI_TOOL_REPAIR_TELEMETRY!,
+      "utf-8",
+    );
+    expect(telemetry).not.toContain(secret);
+    expect(JSON.stringify(persistedEntries)).not.toContain(secret);
+    expect(JSON.stringify(persistedEntries)).not.toContain("notes");
+    expect(persistedEntries.at(-1)).toMatchObject({
+      model: "test-model",
+      outcome: "repaired",
+      profile: "adaptive",
+    });
   });
 });

@@ -4,6 +4,7 @@ node_modules/
 # Docs
 HANDOFF.md
 .claude
+.commandcode/
 
 # Build outputs
 dist/

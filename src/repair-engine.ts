@@ -32,6 +32,7 @@
 
 import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
+import { runRepairPipeline } from "./pipeline.ts";
 
 export interface StructuralRepair {
   /** Rule name recorded in telemetry when the repair fires. */
@@ -57,6 +58,8 @@ export interface RepairResult {
   args: unknown;
   rulesFired: string[];
   notes: string[];
+  /** One entry per mutation, including repeated use of the same stable rule. */
+  changes: Array<{ ruleId: string; note: string }>;
   /** Compact description of the original validation failure, for telemetry. */
   issueSummary: string | undefined;
   /** Stable hash of (tool, failure shape), for spotting per-model regressions. */
@@ -358,7 +361,7 @@ function formatRetryMessage(
 // Driver
 // ---------------------------------------------------------------------------
 
-export function repairToolInput(options: {
+export function repairSchemaInput(options: {
   toolName: string;
   schema: TSchema;
   input: unknown;
@@ -368,9 +371,11 @@ export function repairToolInput(options: {
   const config = options.config ?? {};
   const rulesFired: string[] = [];
   const notes: string[] = [];
+  const changes: Array<{ ruleId: string; note: string }> = [];
   const fire = (rule: string, note: string) => {
     if (!rulesFired.includes(rule)) rulesFired.push(rule);
     notes.push(note);
+    changes.push({ ruleId: rule, note });
   };
 
   const unwrapPathFields = (target: Record<string, unknown>) => {
@@ -400,6 +405,7 @@ export function repairToolInput(options: {
         args: input,
         rulesFired,
         notes,
+        changes,
         issueSummary: undefined,
         fingerprint: undefined,
         retryMessage: undefined,
@@ -410,6 +416,7 @@ export function repairToolInput(options: {
       args: current,
       rulesFired,
       notes,
+      changes,
       issueSummary: undefined,
       fingerprint: undefined,
       retryMessage: undefined,
@@ -427,6 +434,7 @@ export function repairToolInput(options: {
     args: input,
     rulesFired: [],
     notes: [],
+    changes: [],
     issueSummary,
     fingerprint,
     retryMessage: formatRetryMessage(toolName, originalIssues, input),
@@ -499,6 +507,7 @@ export function repairToolInput(options: {
         args: input,
         rulesFired,
         notes,
+        changes,
         issueSummary: undefined,
         fingerprint: undefined,
         retryMessage: undefined,
@@ -509,10 +518,51 @@ export function repairToolInput(options: {
       args: probe,
       rulesFired,
       notes,
+      changes,
       issueSummary,
       fingerprint,
       retryMessage: undefined,
     };
   }
   return unrepairable();
+}
+
+/**
+ * Current-major compatibility facade. New consumers should prefer
+ * `runRepairPipeline`, but this shape and its legacy rule names remain stable.
+ */
+export function repairToolInput(options: {
+  toolName: string;
+  schema: TSchema;
+  input: unknown;
+  config?: ToolRepairConfig;
+}): RepairResult {
+  const result = runRepairPipeline({
+    input: options.input,
+    config: {
+      toolName: options.toolName,
+      schema: options.schema,
+      legacyConfig: options.config,
+    },
+  });
+  const legacyRule = (ruleId: string) =>
+    ruleId === "envelope.decode-json"
+      ? "parseJsonStringifiedRootObject"
+      : ruleId;
+  const rulesFired = [
+    ...new Set(result.changes.map((change) => legacyRule(change.ruleId))),
+  ];
+  return {
+    outcome: result.outcome,
+    args: result.args,
+    rulesFired,
+    notes: result.changes.map((change) => change.note),
+    changes: result.changes.map((change) => ({
+      ruleId: legacyRule(change.ruleId),
+      note: change.note,
+    })),
+    issueSummary: result.issueSummary,
+    fingerprint: result.fingerprint,
+    retryMessage: result.retryMessage,
+  };
 }

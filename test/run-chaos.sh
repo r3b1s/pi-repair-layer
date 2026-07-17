@@ -17,7 +17,7 @@ printf 'edit me: delta\n' > fixture-d.txt
 export PI_TOOL_REPAIR_TELEMETRY="$DIR/telemetry.jsonl"
 export PI_TOOL_REPAIR_LOG=1
 
-OUT="$(pi -e "$REPO/test/chaos-provider.ts" --provider chaos --model repair-chaos -p go 2>"$DIR/stderr.log")" || {
+OUT="$(pi -e "$REPO/test/chaos-provider.ts" --tools read,bash,edit,write,grep,find,ls --provider chaos --model repair-chaos -p go 2>"$DIR/stderr.log")" || {
   echo "pi exited non-zero"; cat "$DIR/stderr.log"; exit 1;
 }
 

@@ -12,6 +12,7 @@ export default tseslint.config(
       "**/vitest.config.ts",
       "**/tsconfig.json",
       "**/types/**/*.d.ts",
+      "test/fixtures/public-consumer.ts",
     ],
   },
   ...tseslint.configs.recommendedTypeCheckedOnly,

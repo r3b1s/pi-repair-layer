@@ -21,6 +21,15 @@ interface DriftBridge {
    * message_end replacement's toolCalls execute same-turn.
    */
   injectToolCall?: { name: string; arguments: Record<string, unknown> };
+  composeToolResult?: boolean;
+  toolResults?: Array<{
+    handler: number;
+    toolName: string;
+    toolCallId: string;
+    content: unknown;
+    details: unknown;
+    isError: boolean;
+  }>;
 }
 
 function bridge(): DriftBridge {
@@ -72,5 +81,43 @@ export default function driftInstrument(pi: {
       stopReason: "toolUse",
     };
     return { message: next };
+  });
+
+  pi.on("tool_result", (event) => {
+    const g = bridge();
+    if (!g.composeToolResult) return;
+    g.toolResults ??= [];
+    g.toolResults.push({
+      handler: 1,
+      toolName: event.toolName,
+      toolCallId: event.toolCallId,
+      content: event.content,
+      details: event.details,
+      isError: event.isError,
+    });
+    return {
+      content: [{ type: "text", text: "<first-handler>" }, ...event.content],
+      details: { original: event.details, first: true },
+      isError: event.isError,
+    };
+  });
+
+  pi.on("tool_result", (event) => {
+    const g = bridge();
+    if (!g.composeToolResult) return;
+    g.toolResults ??= [];
+    g.toolResults.push({
+      handler: 2,
+      toolName: event.toolName,
+      toolCallId: event.toolCallId,
+      content: event.content,
+      details: event.details,
+      isError: event.isError,
+    });
+    return {
+      content: [...event.content, { type: "text", text: "<second-handler>" }],
+      details: { ...event.details, second: true },
+      isError: event.isError,
+    };
   });
 }

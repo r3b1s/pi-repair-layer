@@ -10,18 +10,15 @@ is protecting and where to re-verify it.
 
 ## Verification provenance
 
-- **Verification date:** 2026-07-13
+- **Verification date:** 2026-07-17
 - **Source read:** pi monorepo TypeScript source, clone at `~/Local/docs/pi`,
   git `0e6909f0` (`git describe`: `v0.80.6-24-g0e6909f0`). Package versions in
   the clone: `pi-coding-agent`, `pi-agent-core` (`packages/agent`), and `pi-ai`
   all `0.80.6`.
-- **Installed (this repo's `node_modules`):** `@earendil-works/pi-ai` `0.80.6`,
-  `@earendil-works/pi-coding-agent` `0.80.3`. The coding-agent patch level
-  installed here (`.3`) trails the source clone (`.6`); nothing in the claims
-  below depends on that patch delta, and the version canary (Claim 8) treats
-  patch differences as compatible by design. All line citations are against the
-  clone source at the commit above; a `dist/` build shifts line numbers but not
-  behavior.
+- **Installed (this repo's `node_modules`):** `@earendil-works/pi-ai`,
+  `@earendil-works/pi-coding-agent`, and `@earendil-works/pi-tui` `0.80.6`.
+  Clone citations below remain the source-of-truth citations; installed `dist/`
+  line numbers shift but the tripwires execute that published build directly.
 - **Method:** direct source reading, plus the behavioral tripwires in
   `test/upstream-drift.test.ts` that execute the claims against the installed
   packages.
@@ -181,6 +178,39 @@ anchor-strip exemption for `grep.pattern`: because `grep`'s pattern *is* a real
 regex field, a leading `^` / trailing `$` there may be intentional syntax and is
 indistinguishable from bled anchors, so we never strip it.
 
+### Claim 9 — `tool_result` is global, replaceable, and handler-composed
+
+After any built-in or custom tool finishes, the coding-agent session emits a
+global `tool_result` event containing `toolName`, `toolCallId`, validated
+`input`, `content`, `details`, and `isError`. A handler may replace `content`,
+`details`, or `isError`. The runner threads each replacement through the event
+seen by later handlers and returns the final fields to the agent loop.
+
+- Installed `dist/core/agent-session.js:211-238` — `afterToolCall` emits the
+  complete result event and returns the hook's replacement, preserving the
+  original error flag when no replacement is supplied.
+- Installed `dist/core/extensions/runner.js:600-641` — `emitToolResult` copies
+  the event, visits handlers in registration order, writes each returned field
+  into `currentEvent`, and returns the composed final result.
+- `test/upstream-drift.test.ts` — real-loop tripwires cover a successful custom
+  tool, a throwing custom tool, replacement content/details/error state, and
+  two-handler composition.
+
+**Why it matters:** repair input is prepared before a call ID exists. The layer
+queues value-free feedback, binds it at post-validation `tool_call`, then uses
+`tool_result` to attach one note to success or error output. Grammar-promoted
+custom calls already have IDs and can be associated directly, without wrapping
+another extension's executor.
+
+### Package/runtime assumptions
+
+The published package targets Node 22+ and compiled ESM. `typebox` is a runtime
+dependency; pi coding-agent and pi-tui are peers so the host supplies its live
+integration/UI runtime. `pnpm run test:package` builds and packs the artifact,
+installs it into a clean temporary project, imports `.`, `/core`, `/pi`, and
+`/grammar`, runs the APIs, and typechecks the consumer fixture. This is the
+tripwire for missing JavaScript, declarations, source maps, or stale exports.
+
 ## Re-verification checklist (run on any pi minor bump)
 
 The version canary in `test/upstream-drift.test.ts` fails when installed
@@ -210,3 +240,8 @@ work through this list and update the citations/date above:
    revisit the `grep.pattern` exemption and the dropped schema-anchor defense.
 8. Update `VERIFIED_PI_VERSION`, the verification date, and the commit hash above,
    then commit the refreshed snapshot fixture deliberately.
+9. **`tool_result` lifecycle (Claim 9):** confirm built-in and custom success/error
+   results still reach the global hook, replacements still reach conversation
+   messages, and handlers still compose in registration order.
+10. **Package/runtime:** run `pnpm run test:package`; re-check Node engines,
+    peer/runtime dependencies, every `exports` target, and the pi extension path.

@@ -46,19 +46,25 @@ import {
   getAgentDir,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import {
   type MinimalAssistantMessage,
   modelLeaksGrammar,
   recoverGrammarLeaks,
 } from "./grammar-recovery.ts";
-import { type RepairResult, repairToolInput } from "./repair-engine.ts";
+import {
+  attachRepairNotes,
+  type RepairFeedback,
+  RepairLifecycle,
+} from "./lifecycle.ts";
+import { runRepairPipeline } from "./pipeline.ts";
 import {
   loadDisplaySettings,
   type RepairDisplaySettings,
   saveDisplaySettings,
 } from "./settings.ts";
-import { REPAIR_CONFIGS } from "./tables.ts";
-import { stripValues } from "./value-strips.ts";
+import { PIPELINE_PREPROCESSORS, REPAIR_CONFIGS } from "./tables.ts";
+import type { RepairPipelineResult } from "./types.ts";
 
 const BUILTIN_FACTORIES = {
   read: createReadToolDefinition,
@@ -70,27 +76,15 @@ const BUILTIN_FACTORIES = {
   ls: createLsToolDefinition,
 } as const;
 
-const NOTE_TTL_MS = 5 * 60 * 1000;
 const REPAIR_ENTRY_TYPE = "tool-repair";
-
-interface PendingRepair {
-  argsJson: string;
-  rules: string[];
-  notes: string[];
-  ts: number;
-}
-
-interface RepairInfo {
-  rules: string[];
-  notes: string[];
-}
+type RepairInfo = RepairFeedback;
 
 interface TelemetryRecord {
   ts: string;
   /** Present on the tool channel; absent on the message channel. */
   tool?: string;
   model: string | undefined;
-  outcome: "repaired" | "unrepairable" | "recovered" | "stripped";
+  outcome: "repaired" | "unrepairable" | "recovered" | "stripped" | "observed";
   rules: string[];
   issues?: string | undefined;
   fingerprint?: string | undefined;
@@ -101,6 +95,10 @@ interface TelemetryRecord {
   channel?: "tool" | "message";
   /** Grammar family for recovered/stripped events. */
   grammar?: string;
+  profile?: string;
+  stages?: string[];
+  /** Value-free detection/decision metadata. */
+  observation?: boolean;
 }
 
 function telemetryPath(): string | undefined {
@@ -133,11 +131,30 @@ function passthroughEnabled(): boolean {
  */
 class RepairIndicatorComponent {
   inner: { render(width: number): string[] } | undefined;
-  extraLines: string[] = [];
+  info: RepairInfo | undefined;
+  theme: { fg?: (color: string, text: string) => string } | undefined;
+  settings: RepairDisplaySettings | undefined;
 
   render(width: number): string[] {
     const lines = this.inner?.render(width) ?? [];
-    return this.extraLines.length > 0 ? [...lines, ...this.extraLines] : lines;
+    if (!this.info || !this.settings?.showIndicator) return lines;
+    const muted = (text: string) => {
+      try {
+        return this.theme?.fg ? this.theme.fg("muted", text) : text;
+      } catch {
+        return text;
+      }
+    };
+    const added = wrapTextWithAnsi(
+      muted(`🔨 ✓ input repaired (${this.info.rules.join(", ")})`),
+      width,
+    );
+    if (this.settings.showNotes) {
+      for (const note of this.info.notes) {
+        added.push(...wrapTextWithAnsi(muted(`   ↳ ${note}`), width));
+      }
+    }
+    return [...lines, ...added];
   }
 }
 
@@ -145,32 +162,26 @@ export default function toolRepairExtension(pi: ExtensionAPI) {
   let currentModelId: string | undefined;
   let registeredCwd: string | undefined;
   const displaySettings: RepairDisplaySettings = loadDisplaySettings();
-  const pendingRepairs = new Map<string, PendingRepair[]>();
+  const lifecycle = new RepairLifecycle();
   const repairInfoByCallId = new Map<string, RepairInfo>();
 
   const stashRepair = (
     tool: string,
-    argsJson: string,
+    args: unknown,
     rules: string[],
     notes: string[],
+    stages?: string[],
+    fingerprint?: string,
   ) => {
-    const queue = pendingRepairs.get(tool) ?? [];
-    const now = Date.now();
-    const fresh = queue.filter((entry) => now - entry.ts < NOTE_TTL_MS);
-    fresh.push({ argsJson, rules, notes, ts: now });
-    pendingRepairs.set(tool, fresh);
-  };
-
-  const takeRepair = (
-    tool: string,
-    argsJson: string,
-  ): PendingRepair | undefined => {
-    const queue = pendingRepairs.get(tool);
-    if (!queue) return undefined;
-    const index = queue.findIndex((entry) => entry.argsJson === argsJson);
-    if (index === -1) return undefined;
-    const [entry] = queue.splice(index, 1);
-    return entry;
+    lifecycle.enqueue(tool, args, {
+      rules,
+      notes,
+      stages,
+      profile: displaySettings.policyProfile,
+      model: currentModelId,
+      outcome: "repaired",
+      fingerprint,
+    });
   };
 
   const logTelemetry = (record: TelemetryRecord) => {
@@ -184,34 +195,17 @@ export default function toolRepairExtension(pi: ExtensionAPI) {
     }
   };
 
-  const diag = (tool: string, result: RepairResult) => {
+  const diag = (tool: string, result: RepairPipelineResult) => {
     if (!diagnosticsEnabled()) return;
     const rules =
-      result.rulesFired.length > 0 ? result.rulesFired.join(",") : "none";
+      result.changes.length > 0
+        ? [...new Set(result.changes.map((change) => change.ruleId))].join(",")
+        : "none";
     process.stderr.write(
       `[pi-repair] tool=${tool} outcome=${result.outcome} rules=${rules}${
         result.issueSummary ? ` issues=${result.issueSummary}` : ""
       }\n`,
     );
-  };
-
-  const indicatorLines = (
-    info: RepairInfo,
-    theme: { fg?: (color: string, text: string) => string },
-  ): string[] => {
-    if (!displaySettings.showIndicator) return [];
-    const muted = (text: string) => {
-      try {
-        return theme?.fg ? theme.fg("muted", text) : text;
-      } catch {
-        return text;
-      }
-    };
-    const lines = [muted(`🔨 ✓ input repaired (${info.rules.join(", ")})`)];
-    if (displaySettings.showNotes) {
-      for (const note of info.notes) lines.push(muted(`   ↳ ${note}`));
-    }
-    return lines;
   };
 
   const registerOverrides = (cwd: string) => {
@@ -226,66 +220,59 @@ export default function toolRepairExtension(pi: ExtensionAPI) {
       pi.registerTool({
         ...original,
         prepareArguments(raw: unknown) {
-          let shimmed = raw;
-          if (originalPrepare) {
-            try {
-              shimmed = originalPrepare(raw);
-            } catch {
-              shimmed = raw;
-            }
-          }
-          // Value-strip pre-pass: model-gated strips run before the engine, on
-          // input that is valid both before and after (an anchor-bled string
-          // still validates as a string), so the engine never sees them.
-          const strip = stripValues({
-            toolName: name,
-            input: shimmed,
-            modelId: currentModelId,
+          const result = runRepairPipeline({
+            input: raw,
+            config: {
+              toolName: name,
+              schema: original.parameters,
+              policy: displaySettings.policyProfile,
+              modelId: currentModelId,
+              ownerPrepareArguments: originalPrepare,
+              preprocessors: PIPELINE_PREPROCESSORS[name],
+              legacyConfig: config,
+              onObservation(observation) {
+                logTelemetry({
+                  ts: new Date().toISOString(),
+                  tool: name,
+                  model: currentModelId,
+                  outcome: "observed",
+                  rules: [observation.ruleId],
+                  channel: "tool",
+                  profile: displaySettings.policyProfile,
+                  stages: [observation.stage],
+                  observation: true,
+                });
+              },
+            },
           });
-          const engineInput = strip.result.changed ? strip.input : shimmed;
-          const result = repairToolInput({
-            toolName: name,
-            schema: original.parameters,
-            input: engineInput,
-            config,
-          });
-          if (result.outcome === "valid") {
-            // Engine found nothing to fix. If a strip fired, still surface it as
-            // a repair; otherwise pass the (untouched) input straight through.
-            if (!strip.result.changed) return shimmed;
-            logTelemetry({
-              ts: new Date().toISOString(),
-              tool: name,
-              model: currentModelId,
-              outcome: "repaired",
-              rules: strip.result.rules,
-              issues: undefined,
-              fingerprint: undefined,
-            });
-            stashRepair(
-              name,
-              JSON.stringify(engineInput),
-              strip.result.rules,
-              strip.result.notes,
-            );
-            return engineInput;
-          }
+          if (result.outcome === "valid") return result.args;
           diag(name, result);
+          const rules = [
+            ...new Set(result.changes.map((change) => change.ruleId)),
+          ];
+          const notes = result.changes.map((change) => change.note);
+          const stages = [
+            ...new Set(result.changes.map((change) => change.stage)),
+          ];
           logTelemetry({
             ts: new Date().toISOString(),
             tool: name,
             model: currentModelId,
             outcome: result.outcome,
-            rules: [...strip.result.rules, ...result.rulesFired],
+            rules,
             issues: result.issueSummary,
             fingerprint: result.fingerprint,
+            profile: result.policy,
+            stages,
           });
           if (result.outcome === "repaired") {
             stashRepair(
               name,
-              JSON.stringify(result.args),
-              [...strip.result.rules, ...result.rulesFired],
-              [...strip.result.notes, ...result.notes],
+              result.args,
+              rules,
+              notes,
+              stages,
+              result.fingerprint,
             );
             return result.args;
           }
@@ -295,49 +282,7 @@ export default function toolRepairExtension(pi: ExtensionAPI) {
           if (result.retryMessage && !passthroughEnabled()) {
             throw new Error(result.retryMessage);
           }
-          // Passthrough mode: hand back the stripped input if a strip fired, so
-          // its cleanup is not lost when we defer to pi's native validation.
-          return engineInput;
-        },
-        async execute(toolCallId, params, signal, onUpdate, ctx) {
-          const repair = takeRepair(name, JSON.stringify(params));
-          if (repair) {
-            repairInfoByCallId.set(toolCallId, {
-              rules: repair.rules,
-              notes: repair.notes,
-            });
-            try {
-              pi.appendEntry(REPAIR_ENTRY_TYPE, {
-                toolCallId,
-                tool: name,
-                rules: repair.rules,
-                notes: repair.notes,
-              });
-            } catch {
-              // Persistence is best-effort; the in-memory map still works.
-            }
-          }
-          const result = await original.execute(
-            toolCallId,
-            params,
-            signal,
-            onUpdate,
-            ctx,
-          );
-          if (repair && repair.notes.length > 0) {
-            const noteText = repair.notes
-              .map((note) => `<repair_note>${note}</repair_note>`)
-              .join("\n");
-            const first = Array.isArray(result.content)
-              ? result.content[0]
-              : undefined;
-            if (first?.type === "text") {
-              first.text = `${noteText}\n${first.text}`;
-            } else if (Array.isArray(result.content)) {
-              result.content.unshift({ type: "text", text: noteText });
-            }
-          }
-          return result;
+          return raw;
         },
         ...(originalRenderResult
           ? {
@@ -361,7 +306,9 @@ export default function toolRepairExtension(pi: ExtensionAPI) {
                   ...context,
                   lastComponent: wrapper.inner,
                 });
-                wrapper.extraLines = info ? indicatorLines(info, theme) : [];
+                wrapper.info = info;
+                wrapper.theme = theme;
+                wrapper.settings = displaySettings;
                 return wrapper as any;
               },
             }
@@ -385,7 +332,19 @@ export default function toolRepairExtension(pi: ExtensionAPI) {
         ) {
           repairInfoByCallId.set(e.data.toolCallId, {
             rules: Array.isArray(e.data.rules) ? e.data.rules : [],
-            notes: Array.isArray(e.data.notes) ? e.data.notes : [],
+            notes: [],
+            stages: Array.isArray(e.data.stages) ? e.data.stages : [],
+            profile:
+              typeof e.data.profile === "string" ? e.data.profile : undefined,
+            model: typeof e.data.model === "string" ? e.data.model : undefined,
+            outcome:
+              e.data.outcome === "repaired" || e.data.outcome === "recovered"
+                ? e.data.outcome
+                : undefined,
+            fingerprint:
+              typeof e.data.fingerprint === "string"
+                ? e.data.fingerprint
+                : undefined,
           });
         }
       }
@@ -399,6 +358,44 @@ export default function toolRepairExtension(pi: ExtensionAPI) {
       (event as { model?: { id?: string } }).model?.id ??
       ctx.model?.id ??
       currentModelId;
+  });
+
+  pi.on("tool_call", async (event) => {
+    const repair = lifecycle.correlate(
+      event.toolName,
+      event.input,
+      event.toolCallId,
+    );
+    if (!repair) return undefined;
+    repairInfoByCallId.set(event.toolCallId, repair);
+    try {
+      pi.appendEntry(REPAIR_ENTRY_TYPE, {
+        toolCallId: event.toolCallId,
+        tool: event.toolName,
+        rules: repair.rules,
+        stages: repair.stages,
+        profile: repair.profile,
+        model: repair.model,
+        outcome: repair.outcome,
+        fingerprint: repair.fingerprint,
+      });
+    } catch {
+      // Persistence is best-effort and intentionally excludes values/notes.
+    }
+    return undefined;
+  });
+
+  pi.on("tool_result", async (event) => {
+    const repair = lifecycle.take(event.toolCallId);
+    if (!repair || repair.notes.length === 0) return undefined;
+    return {
+      content: attachRepairNotes(event.content, repair.notes),
+    };
+  });
+
+  pi.on("session_shutdown", async () => {
+    lifecycle.clear();
+    repairInfoByCallId.clear();
   });
 
   const safeGetActiveTools = (): string[] => {
@@ -432,20 +429,56 @@ export default function toolRepairExtension(pi: ExtensionAPI) {
       mode,
       knownTools,
       requireKnownTool: true,
+      unknownToolText: displaySettings.unknownGrammarText,
     });
-    if (!result.changed) return undefined;
+    if (!result.changed) {
+      if (result.observed) {
+        logTelemetry({
+          ts: new Date().toISOString(),
+          model: currentModelId,
+          outcome: "observed",
+          rules: ["grammarObserve"],
+          channel: "message",
+          grammar: result.detectedGrammars.join(",") || undefined,
+          profile: displaySettings.policyProfile,
+          stages: ["grammar"],
+          observation: true,
+        });
+      }
+      return undefined;
+    }
 
     if (result.promoted) {
-      // Tool-keyed "recovered" telemetry, and a stashed note so the executed
-      // (re-entering) built-in call surfaces <repair_note> via the execute wrap.
-      for (const call of result.recoveredCalls) {
+      // Tool-keyed telemetry plus direct call-ID association lets the global
+      // result hook annotate built-in and cooperating custom-tool calls.
+      for (const [index, call] of result.recoveredCalls.entries()) {
         const note = `Recovered a leaked ${call.grammar} tool call for "${call.name}" that the model printed as text instead of emitting a real tool call. Emit a proper tool call next time.`;
-        stashRepair(
-          call.name,
-          JSON.stringify(call.arguments),
-          [`grammarRecovery:${call.grammar}`],
-          [note],
-        );
+        const callId = result.promotedCallIds[index];
+        if (callId) {
+          const feedback: RepairFeedback = {
+            rules: [`grammarRecovery:${call.grammar}`],
+            notes: [note],
+            stages: ["grammar"],
+            profile: displaySettings.policyProfile,
+            model: currentModelId,
+            outcome: "recovered",
+          };
+          lifecycle.associate(callId, feedback);
+          repairInfoByCallId.set(callId, feedback);
+          try {
+            pi.appendEntry(REPAIR_ENTRY_TYPE, {
+              toolCallId: callId,
+              tool: call.name,
+              rules: feedback.rules,
+              stages: feedback.stages,
+              profile: feedback.profile,
+              model: feedback.model,
+              outcome: feedback.outcome,
+            });
+          } catch {
+            // Persistence is best-effort and intentionally excludes values/notes.
+          }
+        }
         logTelemetry({
           ts: new Date().toISOString(),
           tool: call.name,
@@ -453,6 +486,8 @@ export default function toolRepairExtension(pi: ExtensionAPI) {
           outcome: "recovered",
           rules: [`grammarRecovery:${call.grammar}`],
           grammar: call.grammar,
+          profile: displaySettings.policyProfile,
+          stages: ["grammar"],
         });
       }
     } else {
@@ -468,6 +503,8 @@ export default function toolRepairExtension(pi: ExtensionAPI) {
           result.strippedGrammars.length > 0
             ? result.strippedGrammars.join(",")
             : undefined,
+        profile: displaySettings.policyProfile,
+        stages: ["grammar"],
       });
     }
 
@@ -477,23 +514,51 @@ export default function toolRepairExtension(pi: ExtensionAPI) {
   });
 
   const nextGrammarMode = (mode: RepairDisplaySettings["grammarRecovery"]) =>
-    mode === "off" ? "strip" : mode === "strip" ? "recover" : "off";
+    mode === "off"
+      ? "observe"
+      : mode === "observe"
+        ? "strip"
+        : mode === "strip"
+          ? "recover"
+          : "off";
+
+  const nextProfile = (profile: RepairDisplaySettings["policyProfile"]) =>
+    profile === "conservative"
+      ? "adaptive"
+      : profile === "adaptive"
+        ? "recover"
+        : "conservative";
 
   pi.registerCommand("repair-settings", {
     description:
       "Toggle the tool-repair indicator (🔨), repair-note display, and grammar recovery",
     handler: async (_args, ctx) => {
       for (;;) {
+        const profileLabel = `Policy profile: ${displaySettings.policyProfile} — conservative (observe) | adaptive (strip) | recover (promote)`;
         const indicatorLabel = `Repair indicator (🔨 ✓): ${displaySettings.showIndicator ? "on" : "off"} — toggle`;
         const notesLabel = `Repair note text beneath indicator: ${displaySettings.showNotes ? "on" : "off"} — toggle`;
-        const grammarLabel = `Grammar-leak recovery: ${displaySettings.grammarRecovery} — cycle (off → strip → recover)`;
+        const grammarLabel = `Grammar override: ${displaySettings.grammarRecovery} — cycle (off → observe → strip → recover)`;
+        const unknownLabel = `Unknown-tool grammar text: ${displaySettings.unknownGrammarText} — never executable`;
         const choice = await ctx.ui.select("Tool repair display settings", [
+          profileLabel,
           indicatorLabel,
           notesLabel,
           grammarLabel,
+          unknownLabel,
           "Close",
         ]);
         if (choice === undefined || choice === "Close") break;
+        if (choice === profileLabel) {
+          displaySettings.policyProfile = nextProfile(
+            displaySettings.policyProfile,
+          );
+          displaySettings.grammarRecovery =
+            displaySettings.policyProfile === "conservative"
+              ? "observe"
+              : displaySettings.policyProfile === "recover"
+                ? "recover"
+                : "strip";
+        }
         if (choice === indicatorLabel)
           displaySettings.showIndicator = !displaySettings.showIndicator;
         if (choice === notesLabel)
@@ -502,12 +567,17 @@ export default function toolRepairExtension(pi: ExtensionAPI) {
           displaySettings.grammarRecovery = nextGrammarMode(
             displaySettings.grammarRecovery,
           );
+        if (choice === unknownLabel)
+          displaySettings.unknownGrammarText =
+            displaySettings.unknownGrammarText === "preserve"
+              ? "strip"
+              : "preserve";
         saveDisplaySettings(displaySettings);
       }
       ctx.ui.notify(
         `Repair display: indicator ${displaySettings.showIndicator ? "on" : "off"}, notes ${
           displaySettings.showNotes ? "on" : "off"
-        }, grammar recovery ${displaySettings.grammarRecovery} (applies from now on)`,
+        }, policy ${displaySettings.policyProfile}, grammar ${displaySettings.grammarRecovery}, unknown text ${displaySettings.unknownGrammarText} (applies from now on)`,
         "info",
       );
     },

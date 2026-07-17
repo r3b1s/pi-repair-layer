@@ -119,11 +119,11 @@ process.env.PI_TOOL_REPAIR_TELEMETRY = join(workDir, "telemetry.jsonl");
 process.env.PI_TOOL_REPAIR_SETTINGS = join(workDir, "display-settings.json");
 
 const tools = new Map<string, RegisteredTool>();
-const handlers = new Map<string, (e: unknown, c: unknown) => Promise<void>>();
+const handlers = new Map<string, (e: any, c: any) => Promise<any>>();
 const fakePi = {
   registerTool: (def: RegisteredTool) => tools.set(def.name, def),
   registerCommand: () => {},
-  on: (event: string, h: (e: unknown, c: unknown) => Promise<void>) =>
+  on: (event: string, h: (e: any, c: any) => Promise<any>) =>
     handlers.set(event, h),
 } as any;
 
@@ -142,7 +142,26 @@ async function runLikePi(toolName: string, rawArgs: unknown, id = "c1") {
     ? tool.prepareArguments(rawArgs)
     : rawArgs;
   const validated = validateLikePi(tool, prepared);
-  return tool.execute(id, validated, undefined, undefined, { cwd: workDir });
+  await handlers.get("tool_call")?.(
+    { type: "tool_call", toolName, toolCallId: id, input: validated },
+    {},
+  );
+  const result = await tool.execute(id, validated, undefined, undefined, {
+    cwd: workDir,
+  });
+  const replacement = await handlers.get("tool_result")?.(
+    {
+      type: "tool_result",
+      toolName,
+      toolCallId: id,
+      input: validated,
+      content: result.content,
+      details: result.details,
+      isError: false,
+    },
+    {},
+  );
+  return replacement ? { ...result, ...replacement } : result;
 }
 
 function resultText(result: any): string {

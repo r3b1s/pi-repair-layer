@@ -7,13 +7,31 @@
     "url": "https://github.com/r3b1s/pi-repair-layer.git"
   },
   "files": [
-    "index.ts",
-    "src",
+    "dist",
     "README.md",
     "LICENSE"
   ],
   "type": "module",
-  "main": "src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/src/core.d.ts",
+      "import": "./dist/src/core.js"
+    },
+    "./pi": {
+      "types": "./dist/src/pi.d.ts",
+      "import": "./dist/src/pi.js"
+    },
+    "./grammar": {
+      "types": "./dist/src/grammar.d.ts",
+      "import": "./dist/src/grammar.js"
+    }
+  },
   "license": "MIT",
   "publishConfig": {
     "access": "public"
@@ -27,15 +45,20 @@
   ],
   "scripts": {
     "check": "tsc --noEmit",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "lint": "biome check . && eslint src/ test/ index.ts",
     "test": "vitest run",
+    "test:fuzz": "vitest run test/envelope-fuzz.test.ts",
+    "test:fuzz:large": "PI_REPAIR_FUZZ_CASES=10000 vitest run test/envelope-fuzz.test.ts",
     "test:watch": "vitest",
     "format": "biome check --write .",
+    "test:package": "node scripts/package-smoke.mjs",
+    "prepack": "pnpm run build",
     "clean": "rm -rf dist node_modules coverage"
   },
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./dist/index.js"
     ]
   },
   "dependencies": {
@@ -45,6 +68,7 @@
     "@biomejs/biome": "2.4.8",
     "@earendil-works/pi-ai": "^0.80.6",
     "@earendil-works/pi-coding-agent": "0.80.6",
+    "@earendil-works/pi-tui": "0.80.6",
     "@types/node": "^24.0.0",
     "eslint": "^9.25.1",
     "typescript": "^5.9.3",
@@ -52,7 +76,8 @@
     "vitest": "^4.1.10"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
   },
   "packageManager": "pnpm@11.11.0",
   "engines": {

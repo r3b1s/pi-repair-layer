@@ -36,6 +36,12 @@ jobs:
       - name: Test
         run: pnpm run test
 
+      - name: Build and packed consumer
+        run: pnpm run test:package
+
+      - name: Seeded fuzz replay
+        run: pnpm run test:fuzz
+
   release-please:
     needs: [check]
     if: github.ref == 'refs/heads/main'

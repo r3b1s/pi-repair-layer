@@ -15,7 +15,9 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
  *  - "recover": additionally promote leaked calls to real toolCalls that execute
  *    in the same turn. Opt-in, because it promotes model text into execution.
  */
-export type GrammarRecoveryMode = "off" | "strip" | "recover";
+export type GrammarRecoveryMode = "off" | "observe" | "strip" | "recover";
+export type RepairPolicyProfile = "conservative" | "adaptive" | "recover";
+export type UnknownGrammarTextPolicy = "preserve" | "strip";
 
 export interface RepairDisplaySettings {
   /** Append a `🔨 ✓ input repaired (...)` line to repaired tool calls in the TUI. */
@@ -30,6 +32,10 @@ export interface RepairDisplaySettings {
    * name is a currently-registered tool).
    */
   grammarAllowedTools: string[];
+  /** Named pipeline safety profile. */
+  policyProfile: RepairPolicyProfile;
+  /** Unknown grammar is never executable; this controls text preservation only. */
+  unknownGrammarText: UnknownGrammarTextPolicy;
 }
 
 export const DEFAULT_DISPLAY_SETTINGS: RepairDisplaySettings = {
@@ -37,14 +43,38 @@ export const DEFAULT_DISPLAY_SETTINGS: RepairDisplaySettings = {
   showNotes: false,
   grammarRecovery: "strip",
   grammarAllowedTools: [],
+  policyProfile: "adaptive",
+  unknownGrammarText: "preserve",
 };
 
-const GRAMMAR_MODES: GrammarRecoveryMode[] = ["off", "strip", "recover"];
+const GRAMMAR_MODES: GrammarRecoveryMode[] = [
+  "off",
+  "observe",
+  "strip",
+  "recover",
+];
+const POLICY_PROFILES: RepairPolicyProfile[] = [
+  "conservative",
+  "adaptive",
+  "recover",
+];
 
 function isGrammarMode(value: unknown): value is GrammarRecoveryMode {
   return (
     typeof value === "string" && (GRAMMAR_MODES as string[]).includes(value)
   );
+}
+
+function isPolicyProfile(value: unknown): value is RepairPolicyProfile {
+  return (
+    typeof value === "string" && (POLICY_PROFILES as string[]).includes(value)
+  );
+}
+
+function isUnknownGrammarTextPolicy(
+  value: unknown,
+): value is UnknownGrammarTextPolicy {
+  return value === "preserve" || value === "strip";
 }
 
 export function displaySettingsPath(): string {
@@ -59,6 +89,14 @@ export function loadDisplaySettings(
 ): RepairDisplaySettings {
   try {
     const parsed = JSON.parse(readFileSync(path, "utf-8"));
+    const legacyGrammar = isGrammarMode(parsed.grammarRecovery)
+      ? parsed.grammarRecovery
+      : undefined;
+    const policyProfile = isPolicyProfile(parsed.policyProfile)
+      ? parsed.policyProfile
+      : legacyGrammar === "recover"
+        ? "recover"
+        : "adaptive";
     return {
       showIndicator:
         typeof parsed.showIndicator === "boolean"
@@ -68,14 +106,22 @@ export function loadDisplaySettings(
         typeof parsed.showNotes === "boolean"
           ? parsed.showNotes
           : DEFAULT_DISPLAY_SETTINGS.showNotes,
-      grammarRecovery: isGrammarMode(parsed.grammarRecovery)
-        ? parsed.grammarRecovery
-        : DEFAULT_DISPLAY_SETTINGS.grammarRecovery,
+      grammarRecovery:
+        legacyGrammar ??
+        (policyProfile === "conservative"
+          ? "observe"
+          : policyProfile === "recover"
+            ? "recover"
+            : "strip"),
       grammarAllowedTools:
         Array.isArray(parsed.grammarAllowedTools) &&
         parsed.grammarAllowedTools.every((t: unknown) => typeof t === "string")
           ? parsed.grammarAllowedTools
           : [...DEFAULT_DISPLAY_SETTINGS.grammarAllowedTools],
+      policyProfile,
+      unknownGrammarText: isUnknownGrammarTextPolicy(parsed.unknownGrammarText)
+        ? parsed.unknownGrammarText
+        : "preserve",
     };
   } catch {
     return { ...DEFAULT_DISPLAY_SETTINGS };

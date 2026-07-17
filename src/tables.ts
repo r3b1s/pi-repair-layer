@@ -9,6 +9,7 @@
  * this table.
  */
 
+import type { Preprocessor } from "./preprocess.ts";
 import type { StructuralRepair, ToolRepairConfig } from "./repair-engine.ts";
 
 const PATH_ALIASES = [
@@ -181,4 +182,153 @@ export const REPAIR_CONFIGS: Record<string, ToolRepairConfig> = {
     rootString: { field: "path" },
     pathFields: ["path"],
   },
+};
+
+const aliases = (
+  selector: `/${string}`,
+  values: readonly string[],
+  emptyEquivalentToMissing = false,
+  accepts: "string" | "number" | "boolean" | "array" | "object" = "string",
+): Preprocessor => ({
+  kind: "alias",
+  selector,
+  aliases: values,
+  accepts,
+  emptyEquivalentToMissing,
+});
+
+const path = (selector: `/${string}`): Preprocessor => ({
+  kind: "filesystem-path",
+  selector,
+});
+
+const anchor = (selector: `/${string}`): Preprocessor => ({
+  kind: "anchor-bleed",
+  selector,
+  modelFamilies: [/kimi-k2/i, /minimax/i, /glm/i],
+});
+
+const grammar = (selector: `/${string}` | ""): Preprocessor => ({
+  kind: "grammar-tokens",
+  selector,
+  modelFamilies: [/glm/i],
+});
+
+const foldFlatEditPreprocessor: Preprocessor = {
+  kind: "structural",
+  selector: "",
+  ruleId: foldFlatEditFields.name,
+  apply(value) {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      return undefined;
+    }
+    const note = foldFlatEditFields.apply(
+      value as Record<string, unknown>,
+      "edit",
+    );
+    return note === false ? undefined : { value, note };
+  },
+};
+
+/** Selector-based configuration used by the public pipeline and extension. */
+export const PIPELINE_PREPROCESSORS: Record<string, readonly Preprocessor[]> = {
+  read: [
+    aliases("/path", PATH_ALIASES, true),
+    path("/path"),
+    anchor("/path"),
+    grammar(""),
+  ],
+  bash: [
+    aliases("/command", [
+      "cmd",
+      "script",
+      "shell",
+      "bash_command",
+      "bashCommand",
+      "command_line",
+      "commandLine",
+    ]),
+    grammar(""),
+  ],
+  edit: [
+    aliases("/path", PATH_ALIASES, true),
+    aliases(
+      "/edits",
+      ["changes", "replacements", "modifications", "operations"],
+      false,
+      "array",
+    ),
+    aliases("/edits/*/oldText", OLD_TEXT_ALIASES),
+    aliases("/edits/*/newText", NEW_TEXT_ALIASES),
+    path("/path"),
+    anchor("/path"),
+    grammar(""),
+    grammar("/edits/*"),
+    foldFlatEditPreprocessor,
+  ],
+  write: [
+    aliases("/path", PATH_ALIASES, true),
+    aliases("/content", [
+      "text",
+      "body",
+      "data",
+      "contents",
+      "file_content",
+      "fileContent",
+      "file_text",
+      "fileText",
+      "new_content",
+      "newContent",
+    ]),
+    path("/path"),
+    anchor("/path"),
+    grammar(""),
+  ],
+  grep: [
+    aliases("/pattern", [
+      "query",
+      "regex",
+      "search",
+      "q",
+      "expression",
+      "search_pattern",
+      "searchPattern",
+    ]),
+    path("/path"),
+    anchor("/path"),
+    grammar(""),
+  ],
+  find: [
+    aliases("/pattern", [
+      "glob",
+      "query",
+      "name_pattern",
+      "namePattern",
+      "file_pattern",
+      "filePattern",
+      "search",
+      "name",
+    ]),
+    path("/path"),
+    anchor("/path"),
+    anchor("/pattern"),
+    grammar(""),
+  ],
+  ls: [
+    aliases(
+      "/path",
+      [
+        "directory",
+        "dir",
+        "folder",
+        "directory_path",
+        "directoryPath",
+        ...PATH_ALIASES,
+      ],
+      true,
+    ),
+    path("/path"),
+    anchor("/path"),
+    grammar(""),
+  ],
 };

@@ -34,7 +34,7 @@ export const GRAMMAR_NAMES = [
 ] as const;
 
 export type GrammarName = (typeof GRAMMAR_NAMES)[number];
-export type GrammarRecoveryMode = "off" | "strip" | "recover";
+export type GrammarRecoveryMode = "off" | "observe" | "strip" | "recover";
 
 export interface RecoveredToolCall {
   name: string;
@@ -121,6 +121,8 @@ export interface GrammarRecoveryOptions {
   grammars?: readonly GrammarName[];
   /** Require the recovered tool name to be in `knownTools`. Default: true. */
   requireKnownTool?: boolean;
+  /** Unknown/disallowed calls are preserved unless explicitly set to strip. */
+  unknownToolText?: "preserve" | "strip";
 }
 
 export interface GrammarRecoveryResult {
@@ -134,6 +136,12 @@ export interface GrammarRecoveryResult {
   strippedRanges: number;
   /** True when calls were promoted and stopReason was set to "toolUse". */
   promoted: boolean;
+  /** Recognized leak metadata, populated even when observe mode preserves text. */
+  observed: boolean;
+  detectedGrammars: GrammarName[];
+  detectedRanges: number;
+  /** IDs assigned to promoted calls, in recoveredCalls order. */
+  promotedCallIds: string[];
   /** The replacement message (same object when unchanged). */
   message: MinimalAssistantMessage;
 }
@@ -153,6 +161,10 @@ export function recoverGrammarLeaks(
     strippedGrammars: [],
     strippedRanges: 0,
     promoted: false,
+    observed: false,
+    detectedGrammars: [],
+    detectedRanges: 0,
+    promotedCallIds: [],
     message,
   };
 
@@ -166,9 +178,12 @@ export function recoverGrammarLeaks(
 
   const enabled = new Set(options.grammars ?? ALL_GRAMMARS);
   const requireKnownTool = options.requireKnownTool ?? true;
+  const unknownToolText = options.unknownToolText ?? "preserve";
   const existingToolCalls = message.content.filter(isToolCallContent);
   const recoveredCalls: RecoveredToolCall[] = [];
   const strippedGrammars = new Set<GrammarName>();
+  const detectedGrammars = new Set<GrammarName>();
+  let detectedRanges = 0;
   let strippedRanges = 0;
   let changed = false;
 
@@ -176,13 +191,23 @@ export function recoverGrammarLeaks(
     const text = getPartText(part);
     if (text === undefined) return part;
 
-    const candidates = selectCandidates(
+    const detected = selectCandidates(
       parseToolGrammarCandidates(text, enabled),
-    ).filter(
-      (candidate) =>
-        candidate.stripOnly ||
-        isAllowedTool(candidate.name, requireKnownTool, options.knownTools),
     );
+
+    if (detected.length === 0) return part;
+    detectedRanges += detected.length;
+    for (const candidate of detected) detectedGrammars.add(candidate.grammar);
+
+    if (options.mode === "observe") return part;
+
+    const candidates = detected.filter((candidate) => {
+      if (candidate.stripOnly) return true;
+      if (isAllowedTool(candidate.name, requireKnownTool, options.knownTools)) {
+        return true;
+      }
+      return unknownToolText === "strip";
+    });
 
     if (candidates.length === 0) return part;
 
@@ -190,7 +215,12 @@ export function recoverGrammarLeaks(
     changed = true;
     for (const candidate of candidates) {
       strippedGrammars.add(candidate.grammar);
-      if (candidate.stripOnly) continue;
+      if (
+        candidate.stripOnly ||
+        !isAllowedTool(candidate.name, requireKnownTool, options.knownTools)
+      ) {
+        continue;
+      }
       // Safety: a candidate that parsed to an empty argument object is almost
       // always a malformed fragment (e.g. `<tool_call>write</tool_call>`); it
       // would crash as a real call with missing required properties. Skip it.
@@ -218,14 +248,23 @@ export function recoverGrammarLeaks(
     recoveredCalls.length > 0 &&
     message.stopReason === "stop";
 
-  if (!changed && !shouldRecover) return unchanged;
+  if (!changed && !shouldRecover) {
+    if (detectedRanges === 0) return unchanged;
+    return {
+      ...unchanged,
+      observed: true,
+      detectedGrammars: [...detectedGrammars],
+      detectedRanges,
+    };
+  }
 
   if (shouldRecover) {
     let index = 0;
     for (const call of recoveredCalls) {
+      const id = makeRecoveredToolCallId(call.grammar, index++);
       nextContent.push({
         type: "toolCall",
-        id: makeRecoveredToolCallId(call.grammar, index++),
+        id,
         name: call.name,
         arguments: call.arguments,
       });
@@ -244,6 +283,15 @@ export function recoverGrammarLeaks(
     strippedGrammars: [...strippedGrammars],
     strippedRanges,
     promoted: shouldRecover,
+    observed: detectedRanges > 0,
+    detectedGrammars: [...detectedGrammars],
+    detectedRanges,
+    promotedCallIds: shouldRecover
+      ? nextContent
+          .filter(isToolCallContent)
+          .slice(existingToolCalls.length)
+          .map((call) => call.id)
+      : [],
     message: nextMessage,
   };
 }

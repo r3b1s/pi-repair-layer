@@ -55,6 +55,15 @@ interface DriftBridge {
   mutateInPlace?: boolean;
   reassign?: boolean;
   injectToolCall?: { name: string; arguments: Record<string, unknown> };
+  composeToolResult?: boolean;
+  toolResults?: Array<{
+    handler: number;
+    toolName: string;
+    toolCallId: string;
+    content: unknown;
+    details: unknown;
+    isError: boolean;
+  }>;
 }
 
 function driftBridge(): DriftBridge {
@@ -80,6 +89,9 @@ function probeTool(obs: ProbeObservations) {
     },
     async execute(_id: string, params: unknown) {
       obs.executed.push(params);
+      if ((params as { path?: string }).path === "/fail") {
+        throw new Error("probe failure");
+      }
       return {
         content: [
           { type: "text", text: `probe ran ${JSON.stringify(params)}` },
@@ -218,6 +230,48 @@ describe("event-propagation tripwire (research.md Claims 3-4)", () => {
       fauxAssistantMessage("done", { stopReason: "stop" }),
     ]);
     expect(obs.executed).toEqual([{ path: "/injected" }]);
+  });
+});
+
+describe("tool_result propagation tripwire", () => {
+  test("replacement fields compose across handlers for a custom tool", async () => {
+    bridge.composeToolResult = true;
+    const { messages } = await runLoop([
+      fauxAssistantMessage([fauxToolCall("probe", { path: "/ok" })], {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage("done", { stopReason: "stop" }),
+    ]);
+    expect(bridge.toolResults?.map((item) => item.handler)).toEqual([1, 2]);
+    const second = bridge.toolResults?.[1];
+    expect(JSON.stringify(second?.content)).toContain("<first-handler>");
+    expect(second?.details).toMatchObject({ first: true });
+    const result = messages.find(
+      (message: any) => message.role === "toolResult",
+    ) as any;
+    expect(JSON.stringify(result.content)).toContain("<first-handler>");
+    expect(JSON.stringify(result.content)).toContain("<second-handler>");
+    expect(result.details).toMatchObject({ first: true, second: true });
+    expect(result.isError).toBe(false);
+  });
+
+  test("failed custom-tool results are visible and preserve error status", async () => {
+    bridge.composeToolResult = true;
+    const { messages } = await runLoop([
+      fauxAssistantMessage([fauxToolCall("probe", { path: "/fail" })], {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage("done", { stopReason: "stop" }),
+    ]);
+    expect(bridge.toolResults?.[0]).toMatchObject({
+      toolName: "probe",
+      isError: true,
+    });
+    const result = messages.find(
+      (message: any) => message.role === "toolResult",
+    ) as any;
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("<second-handler>");
   });
 });
 

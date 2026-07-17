@@ -37,6 +37,17 @@ Plain-English first, precise meaning after — for readers new to LLM tool-calli
 - **Repair note** — the short explanation this layer hands back to the model
   after fixing a call, so it can self-correct. It rides along as a
   `<repair_note>…</repair_note>` line prefixed to the tool result.
+- **Fast path** — returning an already-valid input without changing or cloning
+  it. This avoids surprising callers and keeps ordinary calls cheap.
+- **Path selector** — a JSON-Pointer-like address for one configured location,
+  such as `/path` or `/edits/*/oldText`; `*` means each array item.
+- **Preprocessor** — an explicitly configured cleanup that runs at a path
+  selector before strict validation, such as an exact alias or path cleanup.
+- **Invariant** — a safety property that must stay true for every input, such as
+  “a repaired verdict is always schema-valid.”
+- **Fail closed** — if a bounded repair cannot prove a valid result, return an
+  error and preserve the original input instead of guessing or executing
+  defaults.
 
 ## Install
 
@@ -65,6 +76,71 @@ pnpm test      # pure engine unit tests + end-to-end against pi's real tools
 
 The toolchain is managed with [mise](https://mise.jdx.dev/) (`mise.toml` pins
 node/pnpm). `mise run ci` runs typecheck + lint + test.
+
+## Pipeline and safety profiles
+
+The ordered pipeline is: bounded raw-envelope recovery → the tool owner's
+compatibility shim → selector-guided preprocessing → policy/model-gated valid
+value cleanup → strict validation → bounded iterative schema repair → native
+conversion and final validation → structured feedback. Every mutation has a
+stable rule ID, stage, and repair note. Unrecoverable arrays or strings never
+become `{}`, and no repaired verdict is returned until the final value passes.
+
+Profiles select coherent safety levels:
+
+| Profile | Envelope/preprocessors/schema repair | Truncated object completion and valid-value strips | Grammar text | Promotion |
+|---|---|---|---|---|
+| `conservative` | yes | no | observe only | never |
+| `adaptive` (default/new and migrated non-recover installs) | yes | schema-validated/model-gated | strip known tools | never |
+| `recover` | yes | schema-validated/model-gated | strip known tools | gated known-tool calls |
+
+Unknown or disallowed tool grammar is preserved in every profile. The separate
+`unknownGrammarText: "strip"` setting can remove that text only after an
+explicit choice; it can never make the unknown call executable. The
+`grammarRecovery` override supports `off`, `observe`, `strip`, and `recover`.
+Legacy settings migrate in memory and are not rewritten until the user saves
+settings again.
+
+## Public npm API for tool owners
+
+The package publishes compiled ESM, declarations, and source maps for:
+
+- `@r3b1s/pi-repair-layer/core` — pure pipeline, policies, envelope,
+  preprocessors, outcomes, lifecycle helpers, note formatting, and the
+  current-major `repairToolInput` compatibility facade.
+- `@r3b1s/pi-repair-layer/pi` — `adaptToolDefinition`, which wraps only a tool
+  definition explicitly supplied by its owning extension.
+- `@r3b1s/pi-repair-layer/grammar` — pure grammar parsing and recovery helpers.
+- `@r3b1s/pi-repair-layer` — the installable pi extension entry point.
+
+Minimal owner integration:
+
+```ts
+import { adaptToolDefinition } from "@r3b1s/pi-repair-layer/pi";
+
+pi.registerTool(adaptToolDefinition({
+  name: "my_tool",
+  label: "My tool",
+  description: "An extension-owned tool",
+  parameters,
+  execute,
+}, {
+  policy: "adaptive",
+  preprocessors: [{
+    kind: "alias",
+    selector: "/path",
+    aliases: ["file_path"],
+    accepts: "string",
+  }],
+}));
+```
+
+Installing this package as a pi extension does not automatically wrap tools
+registered by other extensions: only a tool owner has the pre-validation
+`prepareArguments` seam. The pure core has no filesystem, UI, event,
+telemetry, or network side effects. Node 22+ is supported; pi 0.80.6 is the
+verified integration baseline. Documented exports and types follow semantic
+versioning, and `repairToolInput` remains supported for the current major.
 
 ## What it repairs
 
@@ -97,8 +173,8 @@ itself on the next turn.
 
 ## Model-gated value strips
 
-Before the validate-then-repair engine runs, a small pre-pass
-(`src/value-strips.ts`) cleans two model-specific artifacts that are *valid
+Before strict validation, configured selector preprocessors clean two
+model-specific artifacts that are *valid
 strings* and so slip past validation entirely:
 
 - **Anchor bleed** — leading `^` / trailing `$` bled into a value
@@ -107,8 +183,9 @@ strings* and so slip past validation entirely:
   object keys or values (`{"<arg_key>pattern</arg_key>": "<arg_value>foo</arg_value>"}`
   → `{pattern: "foo"}`).
 
-Both are gated on the current model id — anchor bleed on `kimi-k2` / `minimax` /
-`glm`, grammar tokens on `glm` — since these are model-specific quirks. Each
+Both are path-scoped and gated on the current model id — anchor bleed on
+`kimi-k2` / `minimax` / `glm`, grammar tokens on `glm` — since these are
+model-specific quirks. Each
 strip emits a `<repair_note>` and telemetry exactly like an engine repair, and
 the strips are adapted from [pi-tool-repair](#prior-art). One improvement over
 upstream: the anchor strip **skips `grep.pattern`**, the one built-in field
@@ -126,11 +203,12 @@ emitting a real one, `src/grammar-recovery.ts` (adapted from
 on pi's `message_end` hook. Modes, set via `/repair-settings`:
 
 - **`off`** — never touch assistant text.
-- **`strip`** (default) — remove the leaked grammar from the text on gated
+- **`observe`** — record a value-free detection without changing the message.
+- **`strip`** (adaptive default) — remove known-tool leaked grammar on gated
   models, but never promote it to an executable call.
 - **`recover`** — additionally promote the parsed call to a real tool call that
   executes the same turn and re-enters this layer's `prepareArguments` repair
-  path. A recovery note is stashed so the executed call surfaces
+  path. Its generated call ID is correlated so the global result hook surfaces
   `<repair_note>recovered a leaked … tool call…</repair_note>`.
 
 Because promotion turns model *text* into *execution*, it is guarded: opt-in
@@ -168,7 +246,9 @@ Two consequences drove the architecture:
    `pi.registerTool({ same name })`. Each override here spreads the original
    definition (`createReadToolDefinition(cwd)` etc. are exported from pi's
    root), so renderers, prompt metadata, and execution are the real built-ins;
-   only `prepareArguments` is chained and `execute` thinly wrapped for notes.
+   only `prepareArguments` is chained. A post-validation `tool_call` event
+   correlates successful calls by ID, and the global `tool_result` hook attaches
+   notes to built-in or cooperating custom-tool results.
 
 2. **pi's own coercion (`Value.Convert`) silently corrupts the classic failure
    modes.** Measured on typebox 1.1.38, which pi validates with:
@@ -202,10 +282,10 @@ markdown links pass through, and content fields are never touched.
 ## Telemetry (local only)
 
 Repair outcomes append to `~/.pi/agent/tool-repair/telemetry.jsonl`: timestamp,
-tool, model id, outcome, rules fired, an issue summary, and an FNV-1a
+tool, model id, profile, stages, stable rules, outcome, an issue summary, and an FNV-1a
 fingerprint of the (tool, failure-shape) pair — the same shape-fingerprint
-trick commandcode uses to count distinct failure signatures. Inputs themselves
-are never logged.
+trick commandcode uses to count distinct failure signatures. Inputs, repaired
+values, paths, commands, content, and value-bearing note text are never logged.
 
 Records come on two channels. The **tool channel** (the default; records with no
 `channel` field, so old logs read unchanged) keys on a tool, with `outcome` one
@@ -250,8 +330,9 @@ behaviors this layer depends on are covered by `pnpm test` too, without the
 Repaired tool calls get a `🔨 ✓ input repaired (rules...)` line appended to
 their result row in the TUI; optionally the repair note text renders beneath
 it. `/repair-settings` toggles the indicator and the note text independently,
-and cycles the grammar-leak recovery mode (`off → strip → recover`; default
-`strip`). All three persist to `~/.pi/agent/tool-repair/settings.json` (or
+cycles the profile and grammar override (`off → observe → strip → recover`).
+It also controls the preserve/strip choice for unknown-tool text. These persist
+to `~/.pi/agent/tool-repair/settings.json` (or
 `PI_TOOL_REPAIR_SETTINGS=<path>`), alongside an optional `grammarAllowedTools`
 list that restricts which tool names a leaked call may be promoted to (when
 empty, the active tool set is used). Indicators are persisted per session via
@@ -307,16 +388,15 @@ them is sound.
 ## Limitations
 
 - Only pi's seven built-in tools are wrapped. Custom tools from other
-  extensions aren't (pi has no API to wrap another extension's execute), but
-  they can import `repairToolInput` from `src/repair-engine.ts` and use it in
-  their own `prepareArguments`.
-- Wrong-but-optional fields are invisible to validation by design: pi's schemas
-  allow extra keys, so `grep {pattern, directory: "src"}` validates and
-  silently searches the cwd. No validate-then-repair layer can catch this
-  (commandcode's included); it would take strict schemas or key-similarity
-  heuristics, both with false-positive costs.
-- Unrepairable input falls through to pi's stock validation error, which is
-  already model-readable (per-path issues plus the received arguments).
+  extensions are not intercepted automatically. Their owners can opt in with
+  the compiled `/pi` adapter or pure `/core` API; deep `src/` imports are not a
+  supported contract.
+- Exact configured optional aliases are repaired before the strict-valid fast
+  path. Similar but unconfigured names are deliberately not guessed, and
+  unknown fields are not generically deleted.
+- Unrepairable input fails closed with a model-readable retry error. It does not
+  fall through or become `{}` unless the explicit passthrough environment
+  switch is enabled.
 - If another extension also overrides a built-in tool, load order decides which
   override wins — they don't compose.
 - Phantom tool calls (a tool-use stop reason with zero tool-call blocks) are not
@@ -326,3 +406,13 @@ them is sound.
   provider.
 
 [r-claim6]: docs/research.md#claim-6--stopreason-error-and-aborted-is-terminal-not-a-retry
+
+## Reproducible fuzzing and package checks
+
+`pnpm run test:fuzz` runs the bounded deterministic envelope campaign. Replay a
+reported seed with
+`PI_REPAIR_FUZZ_SEED=<seed> PI_REPAIR_FUZZ_CASES=<count> pnpm run test:fuzz`;
+`pnpm run test:fuzz:large` runs 10,000 cases locally. Confirmed failures are
+minimized and added as named regressions. `pnpm run test:package` builds, packs,
+installs into a clean temporary consumer, imports every subpath, and typechecks
+the public fixture.
