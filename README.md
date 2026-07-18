@@ -120,6 +120,10 @@ invariants in detail.
 Tools registered by other extensions are not intercepted automatically: their
 owner must opt in at the `prepareArguments` boundary.
 
+Working with a coding agent? The integration is packaged as the
+[`pi-tool-repair-integration`](https://github.com/r3b1s/pi-dev-skills) agent
+skill: `npx skills add r3b1s/pi-dev-skills --skill pi-tool-repair-integration`.
+
 ```ts
 import { adaptToolDefinition } from "@r3b1s/pi-repair-layer/pi";
 

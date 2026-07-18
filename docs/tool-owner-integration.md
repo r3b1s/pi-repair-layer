@@ -5,6 +5,17 @@ pipeline to tools that extension owns. The usual integration is one wrapper
 around the tool definition. A lower-level core API is available when the tool
 owner needs to control the surrounding lifecycle.
 
+If a coding agent is doing the integration for you, this guide is also
+packaged as the
+[`pi-tool-repair-integration`](https://github.com/r3b1s/pi-dev-skills/blob/main/skills/pi-tool-repair-integration/SKILL.md)
+agent skill — the workflow, the optional-integration recipe as a copyable
+template, the preprocessor catalog, and the both-branch testing checklist.
+Install it standalone with the [skills CLI](https://github.com/vercel-labs/skills):
+
+```bash
+npx skills add r3b1s/pi-dev-skills --skill pi-tool-repair-integration
+```
+
 ## Contents
 
 - [The ownership boundary](#the-ownership-boundary)
