@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/r3b1s/pi-repair-layer/compare/pi-repair-layer-v0.3.0...pi-repair-layer-v0.4.0) (2026-07-18)
+
+
+### Features
+
+* optional integration fallback for tool owners ([a7e6689](https://github.com/r3b1s/pi-repair-layer/commit/a7e668968f8036c18b6da2882e44713c32f96f9e))
+
+
+### Bug Fixes
+
+* exclude optional-consumer fixture from eslint and tsc ([e5d077c](https://github.com/r3b1s/pi-repair-layer/commit/e5d077c0b3e07e643f0c15d2b6945353fddce2a2))
+
 ## [0.3.0](https://github.com/r3b1s/pi-repair-layer/compare/pi-repair-layer-v0.2.1...pi-repair-layer-v0.3.0) (2026-07-17)
 
 
