@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/r3b1s/pi-repair-layer/compare/pi-repair-layer-v0.4.0...pi-repair-layer-v0.4.1) (2026-07-18)
+
+
+### Documentation
+
+* Update relevant docs to reference new skills repository ([ab54aaa](https://github.com/r3b1s/pi-repair-layer/commit/ab54aaa8b018f78c4ff47e87f2a3bba136e9b483))
+
 ## [0.4.0](https://github.com/r3b1s/pi-repair-layer/compare/pi-repair-layer-v0.3.0...pi-repair-layer-v0.4.0) (2026-07-18)
 
 
