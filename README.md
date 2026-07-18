@@ -8,6 +8,20 @@ same repair pipeline to tools in your own extension.
 
 No LLM calls. No network requests. No uploaded telemetry.
 
+## Contents
+
+- [Why use it?](#why-use-it)
+- [Install](#install)
+- [Terms in plain English](#terms-in-plain-english)
+- [What it repairs](#what-it-repairs)
+- [Safe by design](#safe-by-design)
+- [Use it in your own extension](#use-it-in-your-own-extension)
+- [Settings and local telemetry](#settings-and-local-telemetry)
+- [Documentation](#documentation)
+- [Prior art](#prior-art)
+- [Limitations](#limitations)
+- [Development](#development)
+
 ## Why use it?
 
 Models often understand the task but miss a detail of the tool contract:

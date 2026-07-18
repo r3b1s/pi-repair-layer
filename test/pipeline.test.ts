@@ -106,6 +106,30 @@ describe("ordered repair pipeline", () => {
     });
   });
 
+  test("ignores unrecognized preprocessor kinds alongside recognized ones", () => {
+    const preprocessors = [
+      {
+        kind: "alias",
+        selector: "/path",
+        aliases: ["file_path"],
+        accepts: "string",
+      },
+      // A kind from a hypothetical newer options shape: the graceful-degradation
+      // contract says it must be skipped, never fatal.
+      { kind: "future-unknown-kind", selector: "/path" },
+    ] as unknown as Preprocessor[];
+    const result = runRepairPipeline({
+      input: { file_path: "/x" },
+      config: { toolName: "read", schema, preprocessors },
+    });
+    expect(result.outcome).toBe("repaired");
+    expect(result.args).toEqual({ path: "/x" });
+    expect(result.changes.map((change) => change.ruleId)).toEqual([
+      "preprocess.exact-alias",
+    ]);
+    expect(Value.Check(schema, result.args)).toBe(true);
+  });
+
   test("supports nested array wildcard selectors and preserves unknown content", () => {
     const input = {
       path: "/x",

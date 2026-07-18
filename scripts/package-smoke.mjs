@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   cpSync,
   mkdirSync,
@@ -15,12 +15,47 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const temporary = mkdtempSync(join(tmpdir(), "pi-repair-package-"));
 const packs = join(temporary, "packs");
 const consumer = join(temporary, "consumer");
+const absentConsumer = join(temporary, "absent-consumer");
 mkdirSync(packs);
 mkdirSync(consumer);
+mkdirSync(absentConsumer);
 
 function run(command, args, cwd) {
   execFileSync(command, args, { cwd, stdio: "inherit" });
 }
+
+function runCapture(command, args, cwd) {
+  const result = spawnSync(command, args, { cwd, encoding: "utf8" });
+  if (result.status !== 0) {
+    throw new Error(
+      `${command} ${args.join(" ")} exited with ${result.status}\n${result.stdout}\n${result.stderr}`,
+    );
+  }
+  return { stdout: result.stdout, stderr: result.stderr };
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(`package smoke failed: ${message}`);
+}
+
+const OPTIONAL_RUNNER = `
+import { activateOptionalConsumer } from "./optional-consumer.js";
+
+const registered = [];
+const result = await activateOptionalConsumer({
+  registerTool: (definition) => registered.push(definition),
+});
+const report = {
+  branch: result.branch,
+  registeredCount: registered.length,
+  registeredIsResult: registered[0] === result.registered,
+  hasPrepareArguments: typeof registered[0]?.prepareArguments === "function",
+};
+if (report.hasPrepareArguments) {
+  report.prepared = registered[0].prepareArguments({ file_path: "/x" });
+}
+console.log(JSON.stringify(report));
+`;
 
 try {
   run("pnpm", ["run", "build"], root);
@@ -32,6 +67,12 @@ try {
   writeFileSync(
     join(consumer, "package.json"),
     `${JSON.stringify({ name: "pi-repair-smoke", private: true, type: "module" }, null, 2)}\n`,
+  );
+  // Keep transitive pi packages on the verified integration baseline; a
+  // floating @earendil-works/pi-ai breaks pi-coding-agent@0.80.6.
+  writeFileSync(
+    join(consumer, "pnpm-workspace.yaml"),
+    'overrides:\n  "@earendil-works/pi-ai": 0.80.6\n',
   );
   run(
     "pnpm",
@@ -70,22 +111,88 @@ if (adapted.prepareArguments({ path: "/x" }).path !== "/x") throw new Error("pi 
     join(root, "test", "fixtures", "public-consumer.ts"),
     join(consumer, "consumer.ts"),
   );
+  cpSync(
+    join(root, "test", "fixtures", "optional-consumer.ts"),
+    join(consumer, "optional-consumer.ts"),
+  );
   run("node", ["smoke.mjs"], consumer);
+  const tscArgs = [
+    "--module",
+    "NodeNext",
+    "--moduleResolution",
+    "NodeNext",
+    "--target",
+    "ES2024",
+    "--skipLibCheck",
+  ];
   run(
     join(consumer, "node_modules", ".bin", "tsc"),
-    [
-      "--noEmit",
-      "--module",
-      "NodeNext",
-      "--moduleResolution",
-      "NodeNext",
-      "--target",
-      "ES2024",
-      "--skipLibCheck",
-      "consumer.ts",
-    ],
+    ["--noEmit", ...tscArgs, "consumer.ts", "optional-consumer.ts"],
     consumer,
   );
+  // Emit the optional-consumer fixture as JS so its runtime behavior can be
+  // exercised both with the package installed and in a clean project without it.
+  run(
+    join(consumer, "node_modules", ".bin", "tsc"),
+    [...tscArgs, "optional-consumer.ts"],
+    consumer,
+  );
+  writeFileSync(join(consumer, "optional-runner.mjs"), OPTIONAL_RUNNER);
+
+  // Present-package scenario: the adapter branch must be taken, silently.
+  const presentRun = runCapture("node", ["optional-runner.mjs"], consumer);
+  const present = JSON.parse(presentRun.stdout.trim().split("\n").at(-1));
+  assert(
+    present.branch === "adapted",
+    `expected adapted branch with package installed, got ${present.branch}`,
+  );
+  assert(
+    present.registeredCount === 1 && present.registeredIsResult,
+    "adapted branch did not register the adapted definition",
+  );
+  assert(
+    present.hasPrepareArguments && present.prepared?.path === "/x",
+    "adapted prepareArguments did not apply the configured alias repair",
+  );
+  assert(
+    !`${presentRun.stdout}${presentRun.stderr}`.includes("running unwrapped"),
+    "fallback note emitted although the package is installed",
+  );
+
+  // Absent-package scenario: same compiled fixture in a clean project without
+  // the tarball; the fallback branch must register the raw definition and
+  // emit the one-line note.
+  writeFileSync(
+    join(absentConsumer, "package.json"),
+    `${JSON.stringify({ name: "pi-repair-smoke-absent", private: true, type: "module" }, null, 2)}\n`,
+  );
+  run("pnpm", ["add", "--ignore-scripts", "typebox@1.1.38"], absentConsumer);
+  cpSync(
+    join(consumer, "optional-consumer.js"),
+    join(absentConsumer, "optional-consumer.js"),
+  );
+  writeFileSync(join(absentConsumer, "optional-runner.mjs"), OPTIONAL_RUNNER);
+  const absentRun = runCapture("node", ["optional-runner.mjs"], absentConsumer);
+  const absent = JSON.parse(absentRun.stdout.trim().split("\n").at(-1));
+  assert(
+    absent.branch === "fallback",
+    `expected fallback branch without the package, got ${absent.branch}`,
+  );
+  assert(
+    absent.registeredCount === 1 && absent.registeredIsResult,
+    "fallback branch did not register the raw definition",
+  );
+  assert(
+    absent.hasPrepareArguments === false,
+    "fallback branch registered a wrapped definition instead of the raw one",
+  );
+  assert(
+    absentRun.stderr.includes(
+      "[optional-consumer] @r3b1s/pi-repair-layer not found",
+    ),
+    "fallback note missing from stderr",
+  );
+  console.log("optional-consumer scenarios passed (adapted + fallback)");
 } finally {
   rmSync(temporary, { recursive: true, force: true });
 }

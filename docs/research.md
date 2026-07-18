@@ -23,6 +23,16 @@ is protecting and where to re-verify it.
   `test/upstream-drift.test.ts` that execute the claims against the installed
   packages.
 
+Claims 10–14 (optional integration) were added later with their own provenance:
+
+- **Verification date:** 2026-07-18
+- **Source read:** the same pi clone (`v0.80.6-24-g0e6909f0`); line citations
+  below refer to it.
+- **Empirical runs:** a live pi 0.80.10 install (npm-dist `cli.js` under
+  Node 24) and the official `pi-linux-x64` release binary v0.80.10 (Bun
+  compiled executable), each driven with a throwaway probe extension
+  npm-installed into an isolated `$HOME/.pi/agent/npm` scope.
+
 ## Claims
 
 ### Claim 1 — Loop ordering: `prepareArguments` runs before validation, which runs before the `tool_call` event
@@ -202,6 +212,124 @@ queues value-free feedback, binds it at post-validation `tool_call`, then uses
 custom calls already have IDs and can be associated directly, without wrapping
 another extension's executor.
 
+### Claim 10 — pi maintains one shared npm install project per scope, with flat sibling resolution
+
+All `npm:`-installed extensions in a scope are dependencies of a single private
+npm project named `pi-extensions`, so their packages sit side by side in one
+flat `node_modules`. An end user who runs
+`pi install npm:@r3b1s/pi-repair-layer` therefore makes the package resolvable
+from every other npm-installed extension in that scope.
+
+- `packages/coding-agent/src/core/package-manager.ts:1933-1944` —
+  `ensureNpmProject` writes `{ name: "pi-extensions", private: true }` into the
+  install root's `package.json`.
+- `packages/coding-agent/src/core/package-manager.ts:1956-1964` —
+  `getNpmInstallRoot` returns `join(this.agentDir, "npm")` for the user scope
+  (project scope roots under the project's config dir instead).
+- Live install (pi 0.80.10): `~/.pi/agent/npm/package.json` has
+  `name: "pi-extensions"` with every npm-installed extension as a dependency,
+  and `node_modules` holds them as flat siblings (bun-backed, `bun.lock`
+  present).
+
+**Why it matters:** this is the mechanism behind the shared-`node_modules`
+adoption path in the optional-integration recipe
+(`docs/tool-owner-integration.md`). It is observed managed-install layout, not
+a documented pi API guarantee — the recipe never *depends* on it (resolution
+either succeeds or falls back safely), but the adoption story does.
+
+### Claim 11 — Missing-module error shapes: `MODULE_NOT_FOUND` (jiti/require) vs `ERR_MODULE_NOT_FOUND` (ESM import)
+
+A dynamic import of an uninstalled package surfaces differently depending on
+the loader, but always with one of two `code` values and a message that names
+the requested module:
+
+- jiti 2.7.0 require path (Node): plain `Error`, `code: "MODULE_NOT_FOUND"`,
+  message `Cannot find module '<full specifier>'`.
+- Native Node ESM `import()` (Node 24): `Error`,
+  `code: "ERR_MODULE_NOT_FOUND"`, message
+  `Cannot find package '<package name>'` — **it names the bare package, not
+  the full subpath specifier**, so absence checks must match the package name
+  (`@r3b1s/pi-repair-layer`), never the `/pi` subpath string.
+- Compiled Bun binary (pi-linux-x64 v0.80.10): Bun `ResolveMessage` (an
+  `Error` subclass), `code: "ERR_MODULE_NOT_FOUND"` for `import()` and
+  `"MODULE_NOT_FOUND"` for a scoped `require`, message
+  `Cannot find module '<full specifier>' from '<importer path>'`.
+
+**Why it matters:** the optional-integration recipe treats an import failure
+as "package absent" only when the code is one of these two values **and** the
+message names `@r3b1s/pi-repair-layer`; anything else rethrows so a broken
+install (a *transitive* module missing) is not silently misread as absent.
+All three observed shapes pass that discrimination.
+
+### Claim 12 — Git installs and other scopes do not resolve the shared npm siblings
+
+Git-installed extensions are cloned into `<agentDir>/git/<host>/<path>` and get
+their **own** dependency install inside the clone; they are not siblings of the
+shared npm root. User scope (`~/.pi/agent`) and project scope (`<cwd>/.pi`)
+likewise use separate install roots.
+
+- `packages/coding-agent/src/core/package-manager.ts:1820-1846` — `installGit`
+  clones into `getGitInstallPath(...)` and runs a dependency install inside the
+  clone when it has a `package.json`.
+- `packages/coding-agent/src/core/package-manager.ts:2036-2046` —
+  `getGitInstallRoot` returns `join(this.agentDir, "git")` (user scope) or
+  `join(this.cwd, CONFIG_DIR_NAME, "git")` (project scope).
+
+**Why it matters:** a git-installed or cross-scope consumer cannot resolve an
+npm-installed `@r3b1s/pi-repair-layer` sibling, so the optional recipe falls
+back there even though the user "installed" the package. Documented as a hard
+caveat in the integration guide; `optionalDependencies` is the alternative for
+those consumers.
+
+### Claim 13 — Bun-binary probe: the optional dynamic import falls back under the compiled binary, resolves under npm-dist pi
+
+pi loads extensions through jiti (`moduleCache: false`; in the compiled binary
+additionally `virtualModules` + `tryNative: false`; under Node, `alias`):
+
+- `packages/coding-agent/src/core/extensions/loader.ts:398-404` — the
+  `createJiti` call and both option branches.
+
+End-to-end probe (2026-07-18): a throwaway extension implementing the
+documented recipe, npm-installed into an isolated scope, run once with
+`@r3b1s/pi-repair-layer` npm-installed as a sibling and once without, under
+both pi distributions of v0.80.10:
+
+| runtime | package | observed error (`name`/`code`) | branch taken |
+|---|---|---|---|
+| npm-dist (Node) | absent | `Error`/`ERR_MODULE_NOT_FOUND` | fallback, note emitted |
+| npm-dist (Node) | present | — | **adapted** |
+| compiled binary | absent | `ResolveMessage`/`ERR_MODULE_NOT_FOUND` | fallback, note emitted |
+| compiled binary | present | `ResolveMessage`/`ERR_MODULE_NOT_FOUND` | fallback, note emitted |
+
+Under the compiled Bun binary, *static* imports of the sibling package do
+resolve (jiti's own resolver handles them — verified with a static-import
+probe extension in the same scope), but native dynamic `import()` and the
+scoped `require` both bypass jiti and hit Bun's embedded resolver, which does
+no filesystem `node_modules` resolution — even an absolute-path `import()` of
+the package's entry file loads but then dies on its transitive bare specifier
+(`typebox/value`). There is no consumer-accessible dynamic path through jiti's
+resolver as of this pi version.
+
+**Why it matters:** the optional-integration pattern *activates* only under
+Node-based pi installs (npm/bun global install). Under the official compiled
+binary it degrades safely — the import failure has exactly the absent-package
+shape, so consumers fall back to their raw definition with the one-line note,
+even when the package is installed. A hard static dependency, by contrast,
+works under both distributions. Both facts are documented in the integration
+guide's caveats.
+
+### Claim 14 — Unrecognized preprocessor kinds fall through `preprocessInput` untouched (local guarantee)
+
+This claim is about this repo, not pi: `preprocessInput`
+(`src/preprocess.ts`) matches each configured entry against the known `kind`
+branches and simply skips entries it does not recognize — no mutation, no
+error, no claimed change — and the pipeline still schema-validates the final
+result. A consumer configured against a newer options shape therefore degrades
+to the recognized subset when running against an older installed version.
+Promoted to a spec-level compatibility guarantee by the
+`optional-integration-fallback` change and pinned by a unit test in
+`test/pipeline.test.ts`.
+
 ### Package/runtime assumptions
 
 The published package targets Node 22+ and compiled ESM. `typebox` is a runtime
@@ -245,3 +373,18 @@ work through this list and update the citations/date above:
    messages, and handlers still compose in registration order.
 10. **Package/runtime:** run `pnpm run test:package`; re-check Node engines,
     peer/runtime dependencies, every `exports` target, and the pi extension path.
+11. **Shared npm root (Claim 10):** confirm `ensureNpmProject` still writes one
+    `pi-extensions` project per scope and installs remain flat siblings —
+    re-read `package-manager.ts` and inspect a live `~/.pi/agent/npm`.
+12. **Error shapes (Claim 11):** re-run a missing-module import under jiti, under
+    native Node `import()`, and under the compiled binary; confirm the codes are
+    still `MODULE_NOT_FOUND` / `ERR_MODULE_NOT_FOUND` and the message still names
+    the requested package.
+13. **Git/scope boundaries (Claim 12):** confirm git installs still get their own
+    clone-local dependency install and scopes still use separate install roots.
+14. **Bun-binary probe (Claim 13):** re-run the four-cell probe (npm-dist and
+    compiled binary, package present and absent) with a throwaway recipe
+    extension npm-installed into an isolated `$HOME`; update the outcome table —
+    especially whether dynamic `import()` in the compiled binary has gained
+    filesystem `node_modules` resolution, which would let optional consumers
+    activate there.
