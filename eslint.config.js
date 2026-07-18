@@ -13,6 +13,7 @@ export default tseslint.config(
       "**/tsconfig.json",
       "**/types/**/*.d.ts",
       "test/fixtures/public-consumer.ts",
+      "test/fixtures/optional-consumer.ts",
     ],
   },
   ...tseslint.configs.recommendedTypeCheckedOnly,
