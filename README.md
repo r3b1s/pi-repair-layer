@@ -8,6 +8,12 @@ same repair pipeline to tools in your own extension.
 
 No LLM calls. No network requests. No uploaded telemetry.
 
+### Example: Deepseek v4 Pro
+![deepseek-v4-pro](https://raw.githubusercontent.com/r3b1s/media-assets/refs/heads/main/pi-things/repair-dsv4pro.webp)
+
+### Example: GLM 5.2
+![glm-5.2](https://raw.githubusercontent.com/r3b1s/media-assets/refs/heads/main/pi-things/repair-glm5.2.webp)
+
 ## Contents
 
 - [Why use it?](#why-use-it)
