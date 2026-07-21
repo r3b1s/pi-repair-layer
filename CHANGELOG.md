@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.3](https://github.com/r3b1s/pi-repair-layer/compare/pi-repair-layer-v0.4.2...pi-repair-layer-v0.4.3) (2026-07-21)
+
+
+### Bug Fixes
+
+* **optional-integration:** detect absence by quoted specifier, not bare substring ([80e7f57](https://github.com/r3b1s/pi-repair-layer/commit/80e7f57c9f747c386ca744e74bc109aedd4e71e2))
+
+
+### Documentation
+
+* add optional-integration loader shim to roadmap ([b64334c](https://github.com/r3b1s/pi-repair-layer/commit/b64334c408e759587f810013eadae58e961cd16a))
+
 ## [0.4.2](https://github.com/r3b1s/pi-repair-layer/compare/pi-repair-layer-v0.4.1...pi-repair-layer-v0.4.2) (2026-07-21)
 
 
