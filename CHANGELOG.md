@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/r3b1s/pi-repair-layer/compare/pi-repair-layer-v0.4.1...pi-repair-layer-v0.4.2) (2026-07-21)
+
+
+### Documentation
+
+* Add example screenshots to README.md ([ba05948](https://github.com/r3b1s/pi-repair-layer/commit/ba05948518a0b1d98161f4479b69986e1295778d))
+
 ## [0.4.1](https://github.com/r3b1s/pi-repair-layer/compare/pi-repair-layer-v0.4.0...pi-repair-layer-v0.4.1) (2026-07-18)
 
 
