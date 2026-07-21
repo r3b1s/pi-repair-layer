@@ -12,13 +12,11 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "allowImportingTsExtensions": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "@r3b1s/pi-repair-layer/pi": ["./src/pi.ts"]
+    }
   },
   "include": ["index.ts", "src/**/*.ts", "test/**/*.ts"],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "test/fixtures/public-consumer.ts",
-    "test/fixtures/optional-consumer.ts"
-  ]
+  "exclude": ["node_modules", "dist", "test/fixtures/public-consumer.ts"]
 }
