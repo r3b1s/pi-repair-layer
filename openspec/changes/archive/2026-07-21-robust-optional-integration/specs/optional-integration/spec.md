@@ -1,9 +1,5 @@
-# optional-integration
+## MODIFIED Requirements
 
-## Purpose
-
-Define the documented and tested pattern by which a tool-owning extension integrates the repair adapter as an optional dependency and degrades to its raw tool definition when pi-repair-layer is absent — recipe, adoption paths, caveats, and detection semantics.
-## Requirements
 ### Requirement: Documented optional integration recipe
 The tool-owner integration guide SHALL contain an optional-integration section presenting a complete, copyable fallback recipe by which a tool-owning extension attempts a dynamic import of the `pi` subpath and, when the package is absent, registers its unmodified tool definition. The recipe SHALL treat an import failure as "absent" only when the error code is `MODULE_NOT_FOUND` or `ERR_MODULE_NOT_FOUND` **and** the error message names `@r3b1s/pi-repair-layer` as a quoted module specifier — matched as an opening quote immediately followed by the package name (`'@r3b1s/pi-repair-layer`), with no trailing quote so it matches both the bare-package error (`'@r3b1s/pi-repair-layer'`) and the full-subpath error (`'@r3b1s/pi-repair-layer/pi'`) — rather than as a bare substring, so that the package name appearing only as a `node_modules` path segment does not classify a failure as absence; any other error SHALL be rethrown. The recipe SHALL express this classification as a discrete, exported, unit-testable predicate. The fallback branch SHALL emit a one-line stderr (or debug-channel) note identifying the extension and stating that its tools run unwrapped.
 
@@ -23,28 +19,6 @@ The tool-owner integration guide SHALL contain an optional-integration section p
 - **WHEN** the classification predicate is given a module-not-found error whose message names a different missing module but includes `@r3b1s/pi-repair-layer` only as a `node_modules` path segment (e.g. `Cannot find module 'typebox/value' from '.../node_modules/@r3b1s/pi-repair-layer/...'`)
 - **THEN** the predicate does not classify the failure as absence and the recipe rethrows
 
-### Requirement: Documented adoption paths and caveats
-The optional-integration section SHALL document both adoption paths — end-user opt-in via pi's shared npm install root (presented first) and author-controlled `optionalDependencies` — and SHALL state as explicit caveats: that git-installed extensions and installs in a different pi scope do not resolve the npm-installed sibling; that under the compiled (Bun-binary) pi distribution the dynamic import cannot resolve npm-installed siblings, so the recipe falls back safely even when the package is installed and the pattern activates only under Node-based pi installs; that fallback mode restores pi's native argument coercion behavior rather than merely disabling repairs; and that no double-wrapping can occur because the installable extension only overrides pi's built-in tools.
-
-#### Scenario: Author evaluates degraded behavior
-- **WHEN** an extension author reads the optional-integration section to decide whether fallback is acceptable for their tool
-- **THEN** the section states that in fallback mode invalid input may be natively coerced by pi rather than repaired or rejected, and directs the author to test both branches
-
-#### Scenario: Author diagnoses a non-resolving sibling
-- **WHEN** an author's git-installed extension fails to resolve an npm-installed pi-repair-layer
-- **THEN** the documented scope/source asymmetry caveat explains why and names `optionalDependencies` as the alternative
-
-#### Scenario: Compiled-binary user sees safe fallback
-- **WHEN** a consumer following the recipe activates under the standalone compiled pi binary with the package npm-installed
-- **THEN** the import failure has the absent-package shape, the consumer falls back to its raw definition with the note, and the documented caveat explains that the pattern activates only under Node-based pi installs
-
-### Requirement: Documented consumer manifest pattern
-The optional-integration section SHALL document the consumer `package.json` shape: `@r3b1s/pi-repair-layer` in `devDependencies` for typechecking, declared under `peerDependencies` with `peerDependenciesMeta` marking it optional, and repair options authored as pure data validated with a type-only import so no runtime import is required for compilation.
-
-#### Scenario: Consumer typechecks without runtime dependency
-- **WHEN** a consumer project declares the documented manifest shape and compiles with the package present only in `devDependencies`
-- **THEN** the extension typechecks, and its built output activates in an install without the package
-
 ### Requirement: Optional-consumer fixture and smoke coverage
 The repository SHALL contain an optional-consumer fixture implementing the documented recipe, and the package smoke test SHALL exercise the recipe in a clean project in both states: with the packed package installed (adapter branch taken) and without it (fallback branch taken, fallback note emitted, raw definition registered). The fixture SHALL express the absence classification as an exported predicate, and the repository SHALL contain a unit test that feeds that predicate the documented module-not-found shapes — including a path-bearing transitive-missing error — and asserts that only genuine package absence is classified as absent.
 
@@ -59,11 +33,3 @@ The repository SHALL contain an optional-consumer fixture implementing the docum
 #### Scenario: Predicate accepts the documented absent-package shapes
 - **WHEN** the unit test invokes the exported absence predicate with the native-ESM bare-package error and the jiti/compiled-binary full-subpath error
 - **THEN** the predicate returns that the package is absent for each
-
-### Requirement: Research-backed loading claims
-The mechanical claims the optional pattern relies on — pi's shared per-scope npm install project, jiti's module-not-found error code, git/scope resolution boundaries, and the compiled-binary loading behavior — SHALL be recorded in `docs/research.md` with the verified pi version, date, and a re-verification checklist, and the compiled (Bun-binary) pi build SHALL be probed end-to-end at least once with the result recorded there.
-
-#### Scenario: Claim is auditable after a pi upgrade
-- **WHEN** a maintainer upgrades the verified pi baseline
-- **THEN** research.md lists the optional-integration claims with a checklist sufficient to re-verify sibling resolution and error-code behavior against the new version
-

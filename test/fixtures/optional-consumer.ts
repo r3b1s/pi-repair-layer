@@ -38,6 +38,29 @@ const definition: ToolDefinition<typeof parameters> = {
   },
 };
 
+// Match the package name only where it appears as an imported module
+// specifier: an opening quote immediately followed by the name. No trailing
+// quote — under jiti and the compiled binary the absent-package error names
+// the full subpath (`'@r3b1s/pi-repair-layer/pi'`), while native ESM names the
+// bare package (`'@r3b1s/pi-repair-layer'`); both start with quote-then-name.
+// A `node_modules/@r3b1s/pi-repair-layer/...` path segment is preceded by `/`,
+// not a quote, so a transitive-missing error does not read as absence.
+const REPAIR_PACKAGE_SPECIFIER_QUOTED = "'@r3b1s/pi-repair-layer";
+
+/**
+ * Classify a dynamic-import failure as "the pi-repair-layer package is absent"
+ * (fall back to the raw tool) versus any other error — a present-but-broken
+ * install, an unrelated failure — that must rethrow.
+ */
+export function isRepairPackageAbsent(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    (code === "MODULE_NOT_FOUND" || code === "ERR_MODULE_NOT_FOUND") &&
+    message.includes(REPAIR_PACKAGE_SPECIFIER_QUOTED)
+  );
+}
+
 async function loadRepairAdapter(): Promise<
   typeof adaptToolDefinition | undefined
 > {
@@ -45,12 +68,7 @@ async function loadRepairAdapter(): Promise<
     const repair = await import("@r3b1s/pi-repair-layer/pi");
     return repair.adaptToolDefinition;
   } catch (error) {
-    const code = (error as { code?: unknown } | null)?.code;
-    const message = error instanceof Error ? error.message : String(error);
-    const packageAbsent =
-      (code === "MODULE_NOT_FOUND" || code === "ERR_MODULE_NOT_FOUND") &&
-      message.includes("@r3b1s/pi-repair-layer");
-    if (!packageAbsent) throw error;
+    if (!isRepairPackageAbsent(error)) throw error;
     return undefined;
   }
 }

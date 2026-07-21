@@ -257,9 +257,19 @@ the requested module:
 
 **Why it matters:** the optional-integration recipe treats an import failure
 as "package absent" only when the code is one of these two values **and** the
-message names `@r3b1s/pi-repair-layer`; anything else rethrows so a broken
-install (a *transitive* module missing) is not silently misread as absent.
-All three observed shapes pass that discrimination.
+message names `@r3b1s/pi-repair-layer` **as a quoted module specifier** —
+matched as an opening quote immediately followed by the name
+(`'@r3b1s/pi-repair-layer`, no trailing quote so both the bare-package and
+`/pi`-subpath forms match); anything else rethrows so a broken install (a
+*transitive* module missing, e.g. `typebox`) is not silently misread as
+absent. The quote anchor matters because the jiti and compiled-binary shapes
+carry the importer path: a present-but-broken install throws
+`Cannot find module 'typebox/value' from '.../node_modules/@r3b1s/pi-repair-layer/...'`,
+which contains `@r3b1s/pi-repair-layer` only as a path segment (preceded by
+`/`, not a quote). A bare-substring match would misread that as absence; the
+quoted-specifier match rethrows it loudly. All three observed absent-package
+shapes still begin with quote-then-name and pass the discrimination.
+(Refined 2026-07-21; matcher verified by unit test against all three shapes.)
 
 ### Claim 12 — Git installs and other scopes do not resolve the shared npm siblings
 

@@ -191,6 +191,21 @@ const definition: ToolDefinition<typeof parameters> = {
   },
 };
 
+// Opening quote + name, no trailing quote: matches both the bare-package ESM
+// error (`'@r3b1s/pi-repair-layer'`) and the jiti/binary subpath error
+// (`'@r3b1s/pi-repair-layer/pi'`), while a `node_modules/...` path segment
+// (preceded by `/`, not a quote) does not read as absence.
+const REPAIR_PACKAGE_SPECIFIER_QUOTED = "'@r3b1s/pi-repair-layer";
+
+export function isRepairPackageAbsent(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    (code === "MODULE_NOT_FOUND" || code === "ERR_MODULE_NOT_FOUND") &&
+    message.includes(REPAIR_PACKAGE_SPECIFIER_QUOTED)
+  );
+}
+
 async function loadRepairAdapter(): Promise<
   typeof adaptToolDefinition | undefined
 > {
@@ -198,12 +213,7 @@ async function loadRepairAdapter(): Promise<
     const repair = await import("@r3b1s/pi-repair-layer/pi");
     return repair.adaptToolDefinition;
   } catch (error) {
-    const code = (error as { code?: unknown } | null)?.code;
-    const message = error instanceof Error ? error.message : String(error);
-    const packageAbsent =
-      (code === "MODULE_NOT_FOUND" || code === "ERR_MODULE_NOT_FOUND") &&
-      message.includes("@r3b1s/pi-repair-layer");
-    if (!packageAbsent) throw error;
+    if (!isRepairPackageAbsent(error)) throw error;
     return undefined;
   }
 }
@@ -225,12 +235,16 @@ The details are load-bearing:
   `code: "MODULE_NOT_FOUND"` (jiti's require path) or
   `code: "ERR_MODULE_NOT_FOUND"` (native ESM and the compiled pi binary). But
   a *present-but-broken* install — pi-repair-layer resolvable while one of its
-  own transitive modules is not — throws the same codes naming the
-  *transitive* module. Requiring the message to name
-  `@r3b1s/pi-repair-layer` keeps a broken install loud instead of silently
-  running unwrapped while the user believes repairs are active. Match the
-  package name, not the `/pi` subpath: native ESM reports only
-  `Cannot find package '@r3b1s/pi-repair-layer'`.
+  own transitive modules (e.g. `typebox`) is not — throws the same codes
+  naming the *transitive* module, and its message embeds
+  `.../node_modules/@r3b1s/pi-repair-layer/...` as a path segment. Match the
+  package name only where it appears as an imported specifier — an opening
+  quote immediately followed by the name (`'@r3b1s/pi-repair-layer`) — so that
+  path segment does not read as absence. No trailing quote: jiti and the
+  compiled binary name the full subpath (`'@r3b1s/pi-repair-layer/pi'`) while
+  native ESM names the bare package (`'@r3b1s/pi-repair-layer'`); both start
+  with quote-then-name. This keeps a broken install loud (it rethrows) instead
+  of silently running unwrapped while the user believes repairs are active.
 - **Rethrow everything else.** Any other error is a real failure, not
   absence.
 - **Emit one stderr line when falling back.** The two branches differ in
@@ -337,7 +351,11 @@ touches is deliberately small and covered by the compatibility contract in
   current major; documented exports follow semantic versioning.
 - Absence detection semantics are part of the contract: a missing package
   surfaces with `code` `MODULE_NOT_FOUND` or `ERR_MODULE_NOT_FOUND` and a
-  message naming the requested module.
+  message naming the requested module. The recipe matches that name as a
+  quoted specifier (`'@r3b1s/pi-repair-layer`, opening quote + name), not a
+  bare substring, so the package name appearing as a `node_modules` path
+  segment in a present-but-broken install rethrows loudly rather than reading
+  as absence.
 - Unrecognized preprocessor `kind`s are ignored — never fatal, no mutation, no
   claimed change — and results are still schema-validated. Repair options
   written against a newer minor version therefore degrade to the recognized
